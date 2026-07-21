@@ -15,6 +15,8 @@ Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps
 
 The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain via `tx.from`. Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
 
+New customers get a **5-day free trial** of Pro or Ultra when you pay by card — full access, nothing charged during the trial, cancel anytime. Start at [madeonsol.com/pricing](https://madeonsol.com/pricing).
+
 ## Quick start (10 seconds)
 
 ```bash
@@ -24,7 +26,7 @@ npm install robinhood-chain-sdk
 ```ts
 import { RobinhoodClient } from "robinhood-chain-sdk";
 
-const client = new RobinhoodClient({ apiKey: "msk_..." }); // free key at madeonsol.com/developer
+const client = new RobinhoodClient({ apiKey: "msk_..." }); // free key at madeonsol.com/pricing
 
 // Tokens being bought by 2+ tracked KOLs on Robinhood Chain right now
 const { tokens } = await client.kol.hotTokens({ window: "1h" });
@@ -35,7 +37,7 @@ Requires **Node.js ≥ 18** (native `fetch`). Works in Cloudflare Workers, Verce
 
 ## Authentication
 
-Get a free API key at **[madeonsol.com/developer](https://madeonsol.com/developer)** — keys start with `msk_`. The same key unlocks both the Solana API and Robinhood Chain.
+Get a free API key at **[madeonsol.com/pricing](https://madeonsol.com/pricing)** — keys start with `msk_`. The same key unlocks both the Solana API and Robinhood Chain.
 
 ```ts
 const client = new RobinhoodClient({
@@ -239,7 +241,7 @@ Fully-typed responses and params for all 14 endpoints are exported (`RhcKolFeedR
 - **Robinhood Chain** — [madeonsol.com/robinhood](https://madeonsol.com/robinhood)
 - **Pricing** — [madeonsol.com/pricing](https://madeonsol.com/pricing) (Robinhood Chain bundled into every tier)
 - **API docs** — [madeonsol.com/api-docs](https://madeonsol.com/api-docs)
-- **Get a free key** — [madeonsol.com/developer](https://madeonsol.com/developer)
+- **Get a free key** — [madeonsol.com/pricing](https://madeonsol.com/pricing)
 - **npm** — [robinhood-chain-sdk](https://www.npmjs.com/package/robinhood-chain-sdk)
 - **GitHub** — [madeonsol/robinhood-chain-sdk](https://github.com/madeonsol/robinhood-chain-sdk)
 
