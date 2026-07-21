@@ -1,0 +1,23 @@
+name: parity
+# Fails if this SDK references an /rhc/* API path that isn't one of the 14
+# published Robinhood Chain routes (rename drift). This standalone repo is not
+# covered by the monorepo's SDK route-parity guard, so it runs its own.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  route-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check RHC SDK paths against the 14 Robinhood Chain routes
+        run: node scripts/route-parity-check.mjs
+      - name: Type-check
+        run: |
+          npm install
+          npm run build

@@ -1,0 +1,10 @@
+src/
+examples/
+scripts/
+.github/
+tsconfig.json
+.gitignore
+.env
+.env.local
+*.tsbuildinfo
+dist-examples/

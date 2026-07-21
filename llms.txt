@@ -1,0 +1,71 @@
+# robinhood-chain-sdk
+
+> Official TypeScript SDK for the Robinhood Chain (chain id 4663) API — EVM-native on-chain trading intelligence.
+
+## What is Robinhood Chain?
+
+Robinhood Chain (RHC) is an Arbitrum Orbit L2, chain id 4663. MadeOnSol (https://madeonsol.com/robinhood) runs a self-hosted node and exposes EVM-native intelligence over the same paid v1 API and the same `msk_` API key as the Solana product — bundled into every tier at no extra cost. All addresses are lowercase `0x`, amounts are `eth_amount`, transactions are `tx_hash`, and blocks are `block_number`.
+
+- **KOL Trades**: live buy/sell feed from tracked Solana KOLs' verified EVM wallets, a KOL activity leaderboard, consensus "hot tokens" (2+ KOLs), and per-KOL profiles.
+- **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), and same-block launch-bundle detection.
+- **DEX Trade Tape**: every Uniswap v2/v3/v4 swap with the real trader EOA (tx.from), gas/ordering for MEV analysis, and KOL/deployer flags.
+- **Deployer Hunter**: reputation leaderboard + per-deployer profiles (graduation = $40K peak MC, runner = $100K).
+- **Alpha Wallets**: smart-money ranking by realized on-chain performance (net ETH, win rate, memecoin share), with bot-fleet flagging.
+- **Streaming**: managed WebSocket for `rhc:kol_trades` and `rhc:trades`.
+
+## Installation
+
+```
+npm install robinhood-chain-sdk
+```
+
+## Authentication
+
+Get a free API key at https://madeonsol.com/developer (starts with `msk_`).
+
+```typescript
+import { RobinhoodClient } from "robinhood-chain-sdk";
+const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
+```
+
+## Methods (all 14 endpoints)
+
+### KOL (client.kol) — BASIC
+- `client.kol.feed(params?)` — GET /rhc/kol/feed — live KOL trade feed
+- `client.kol.leaderboard(params?)` — GET /rhc/kol/leaderboard — KOL activity leaderboard
+- `client.kol.hotTokens(params?)` — GET /rhc/kol/hot-tokens — tokens bought by 2+ KOLs
+- `client.kol.wallet(wallet)` — GET /rhc/kol/{wallet} — single KOL profile
+
+### DEX tape (client.trades) — PRO+
+- `client.trades(params?)` — GET /rhc/trades — Uniswap v2/v3/v4 trade tape
+
+### Tokens (client.tokens)
+- `client.tokens.list(params?)` — GET /rhc/tokens — token discovery (PRO+)
+- `client.tokens.get(address)` — GET /rhc/tokens/{address} — token snapshot (BASIC)
+- `client.tokens.candles(address, params?)` — GET /rhc/tokens/{address}/candles — 1m OHLC (PRO+)
+- `client.tokens.kolConsensus(address)` — GET /rhc/tokens/{address}/kol-consensus (PRO+)
+- `client.tokens.buyerQuality(address)` — GET /rhc/tokens/{address}/buyer-quality (BASIC)
+- `client.tokens.bundle(address)` — GET /rhc/tokens/{address}/bundle — launch-bundle detection (BASIC)
+
+### Deployer Hunter (client.deployerHunter) — BASIC
+- `client.deployerHunter.leaderboard(params?)` — GET /rhc/deployer-hunter/leaderboard
+- `client.deployerHunter.profile(address)` — GET /rhc/deployer-hunter/{address}
+
+### Alpha Wallets (client.alphaWallets) — PRO+
+- `client.alphaWallets(params?)` — GET /rhc/alpha-wallets — smart-money ranking
+
+### Streaming (client.stream) — PRO+
+- `client.stream.getToken()` — POST /stream/token — 24h WS token
+- `client.stream.connect()` — managed WebSocket (channels: rhc:kol_trades, rhc:trades)
+
+## Error handling
+
+All methods throw `RobinhoodError` with `.message`, `.status`, `.body`, and `.requestId` (`_rid`). 429 and 5xx responses are retried automatically with backoff.
+
+## Links
+
+- Robinhood Chain: https://madeonsol.com/robinhood
+- Pricing: https://madeonsol.com/pricing
+- API docs: https://madeonsol.com/api-docs
+- npm: https://www.npmjs.com/package/robinhood-chain-sdk
+- GitHub: https://github.com/madeonsol/robinhood-chain-sdk
