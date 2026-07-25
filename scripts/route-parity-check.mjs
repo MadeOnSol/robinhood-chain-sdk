@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * route-parity-check.mjs — fails CI if this SDK references an `/rhc/*` API path
- * that is not one of the 14 published Robinhood Chain routes (rename drift).
+ * that is not one of the 25 published Robinhood Chain routes (rename drift).
  *
  * This standalone repo is NOT scanned by the monorepo's sdk-route-parity guard,
- * so it ships its own. The 14 routes are pinned below (the authoritative RHC
+ * so it ships its own. The 25 routes are pinned below (the authoritative RHC
  * surface, chain id 4663). Set OPENAPI_URL to instead validate against the live
  * spec's `/rhc/*` paths.
  *
@@ -20,11 +20,13 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, "..", "src");
 
-// The 14 authoritative Robinhood Chain routes (relative to /api/v1), normalized.
+// The 25 authoritative Robinhood Chain routes (relative to /api/v1), normalized.
 const RHC_ROUTES = [
   "/rhc/kol/feed",
   "/rhc/kol/leaderboard",
   "/rhc/kol/hot-tokens",
+  "/rhc/kol/coordination",
+  "/rhc/kol/first-touches",
   "/rhc/kol/:p",
   "/rhc/trades",
   "/rhc/tokens",
@@ -33,8 +35,17 @@ const RHC_ROUTES = [
   "/rhc/tokens/:p/kol-consensus",
   "/rhc/tokens/:p/buyer-quality",
   "/rhc/tokens/:p/bundle",
+  "/rhc/token/batch",
+  "/rhc/tokens/batch/buyer-quality",
   "/rhc/deployer-hunter/leaderboard",
+  "/rhc/deployer-hunter/best-tokens",
+  "/rhc/deployer-hunter/stats",
+  "/rhc/deployer-hunter/alerts",
+  "/rhc/deployer-hunter/recent-bonds",
   "/rhc/deployer-hunter/:p",
+  "/rhc/deployer-hunter/:p/trajectory",
+  "/rhc/deployer-hunter/:p/tokens",
+  "/rhc/deployer-hunter/:p/history",
   "/rhc/alpha-wallets",
 ];
 

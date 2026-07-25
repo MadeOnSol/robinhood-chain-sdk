@@ -7,13 +7,13 @@
  * Run:
  *   MADEONSOL_API_KEY=msk_... npx tsx examples/token-bundle-check.ts 0xTOKEN
  *
- * Free key at https://madeonsol.com/developer.
+ * Free key at https://madeonsol.com/pricing.
  */
 import { RobinhoodClient } from "robinhood-chain-sdk";
 
 const apiKey = process.env.MADEONSOL_API_KEY;
 if (!apiKey) {
-  console.error("Set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/developer");
+  console.error("Set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/pricing");
   process.exit(1);
 }
 

@@ -4,13 +4,13 @@
  * Run:
  *   MADEONSOL_API_KEY=msk_... npx tsx examples/stream-kol-trades.ts
  *
- * On Node < 22, also `npm i ws`. Free key at https://madeonsol.com/developer.
+ * On Node < 22, also `npm i ws`. Free key at https://madeonsol.com/pricing.
  */
 import { RobinhoodClient } from "robinhood-chain-sdk";
 
 const apiKey = process.env.MADEONSOL_API_KEY;
 if (!apiKey) {
-  console.error("Set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/developer");
+  console.error("Set MADEONSOL_API_KEY — get a free one at https://madeonsol.com/pricing");
   process.exit(1);
 }
 

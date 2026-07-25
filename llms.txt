@@ -7,9 +7,10 @@
 Robinhood Chain (RHC) is an Arbitrum Orbit L2, chain id 4663. MadeOnSol (https://madeonsol.com/robinhood) runs a self-hosted node and exposes EVM-native intelligence over the same paid v1 API and the same `msk_` API key as the Solana product — bundled into every tier at no extra cost. All addresses are lowercase `0x`, amounts are `eth_amount`, transactions are `tx_hash`, and blocks are `block_number`.
 
 - **KOL Trades**: live buy/sell feed from tracked Solana KOLs' verified EVM wallets, a KOL activity leaderboard, consensus "hot tokens" (2+ KOLs), and per-KOL profiles.
-- **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), and same-block launch-bundle detection.
+- **KOL Signals**: coordination (tokens N+ distinct KOLs are buying, with the cohort breakdown) and first touches (the earliest KOL entry per token).
+- **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), same-block launch-bundle detection, and batch reads (50 tokens; 20 for buyer-quality).
 - **DEX Trade Tape**: every Uniswap v2/v3/v4 swap with the real trader EOA (tx.from), gas/ordering for MEV analysis, and KOL/deployer flags.
-- **Deployer Hunter**: reputation leaderboard + per-deployer profiles (graduation = $40K peak MC, runner = $100K).
+- **Deployer Hunter**: reputation leaderboard, per-deployer profiles, trajectory, launch history, best tokens, chain-wide stats, the alert feed, and recent graduations (graduation = $40K peak MC, runner = $100K; the elite/good tier rides runner_rate + 24h of deployer history).
 - **Alpha Wallets**: smart-money ranking by realized on-chain performance (net ETH, win rate, memecoin share), with bot-fleet flagging.
 - **Streaming**: managed WebSocket for `rhc:kol_trades` and `rhc:trades`.
 
@@ -21,19 +22,21 @@ npm install robinhood-chain-sdk
 
 ## Authentication
 
-Get a free API key at https://madeonsol.com/developer (starts with `msk_`).
+Get a free API key at https://madeonsol.com/pricing (starts with `msk_`).
 
 ```typescript
 import { RobinhoodClient } from "robinhood-chain-sdk";
 const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 ```
 
-## Methods (all 14 endpoints)
+## Methods (all 25 endpoints)
 
 ### KOL (client.kol) — BASIC
 - `client.kol.feed(params?)` — GET /rhc/kol/feed — live KOL trade feed
 - `client.kol.leaderboard(params?)` — GET /rhc/kol/leaderboard — KOL activity leaderboard
 - `client.kol.hotTokens(params?)` — GET /rhc/kol/hot-tokens — tokens bought by 2+ KOLs
+- `client.kol.coordination(params?)` — GET /rhc/kol/coordination — tokens bought by N+ distinct KOLs, with the per-KOL cohort breakdown, net ETH, accumulating/distributing and exit state
+- `client.kol.firstTouches(params?)` — GET /rhc/kol/first-touches — the globally earliest KOL buy per token (limit clamped to 20 below PRO; first_kol.evm_address is ULTRA-only)
 - `client.kol.wallet(wallet)` — GET /rhc/kol/{wallet} — single KOL profile
 
 ### DEX tape (client.trades) — PRO+
@@ -46,10 +49,20 @@ const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 - `client.tokens.kolConsensus(address)` — GET /rhc/tokens/{address}/kol-consensus (PRO+)
 - `client.tokens.buyerQuality(address)` — GET /rhc/tokens/{address}/buyer-quality (BASIC)
 - `client.tokens.bundle(address)` — GET /rhc/tokens/{address}/bundle — launch-bundle detection (BASIC)
+- `client.tokens.batch(addresses)` — POST /rhc/token/batch — up to 50 tokens in one call; unknown addresses echo back as found:false (BASIC)
+- `client.tokens.batchBuyerQuality(addresses)` — POST /rhc/tokens/batch/buyer-quality — MAX 20 (not the Solana 50 — per-token cohort computation); per-token failures degrade to an error entry (BASIC)
 
-### Deployer Hunter (client.deployerHunter) — BASIC
-- `client.deployerHunter.leaderboard(params?)` — GET /rhc/deployer-hunter/leaderboard
-- `client.deployerHunter.profile(address)` — GET /rhc/deployer-hunter/{address}
+### Deployer Hunter (client.deployerHunter)
+Tier semantics (migrations 267 + 269): elite/good are earned on the $100K runner_rate AND require 24h of deployer history. graduation_rate still means the $40K bar and is still returned, but no longer sets the tier; only spammer still keys off it.
+- `client.deployerHunter.leaderboard(params?)` — GET /rhc/deployer-hunter/leaderboard (BASIC)
+- `client.deployerHunter.profile(address)` — GET /rhc/deployer-hunter/{address} (BASIC)
+- `client.deployerHunter.trajectory(address)` — GET /rhc/deployer-hunter/{address}/trajectory — streaks, rolling 10-launch success curve, trend; success event is the $40K graduation (BASIC)
+- `client.deployerHunter.tokens(address, params?)` — GET /rhc/deployer-hunter/{address}/tokens — paginated launch history; sort=peak_mc_usd is page-scoped (BASIC)
+- `client.deployerHunter.history(address, params?)` — GET /rhc/deployer-hunter/{address}/history — deploy history + reputation row (PRO+)
+- `client.deployerHunter.bestTokens(params?)` — GET /rhc/deployer-hunter/best-tokens — highest-peaking tokens from elite/good deployers (BASIC)
+- `client.deployerHunter.stats()` — GET /rhc/deployer-hunter/stats — chain-wide tier population, spam share, alert volume, active tier_rules (BASIC)
+- `client.deployerHunter.alerts(params?)` — GET /rhc/deployer-hunter/alerts — new_deploy/graduated feed; tradability-filtered by default (liquidity_usd >= $100, unknown fails — include_untradeable=true disables it); tier resolved at read time with tier_at_alert + tier_is_stale (BASIC)
+- `client.deployerHunter.recentBonds(params?)` — GET /rhc/deployer-hunter/recent-bonds — recent $40K peak-MC graduations (BASIC)
 
 ### Alpha Wallets (client.alphaWallets) — PRO+
 - `client.alphaWallets(params?)` — GET /rhc/alpha-wallets — smart-money ranking

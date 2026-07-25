@@ -235,6 +235,139 @@ export interface RhcKolProfileResponse {
   _rid?: string;
 }
 
+// ─── KOL coordination (/rhc/kol/coordination) ────────────────────────────────
+
+export type RhcCoordinationPeriod = "1h" | "6h" | "24h" | "7d";
+/** Cohort direction over the window — net_eth ≥ 0 accumulating, else distributing. */
+export type RhcCoordinationSignal = "accumulating" | "distributing";
+
+export interface RhcKolCoordinationParams {
+  /** Rolling window. Default: "24h". */
+  period?: RhcCoordinationPeriod;
+  /** Minimum distinct KOL buyers for a token to qualify (2–50). Default: 2. */
+  min_kols?: number;
+  /** Max tokens (1–50). Default: 20. */
+  limit?: number;
+  /** Minimum market cap at the FIRST KOL buy (USD). Tokens with an unknown entry MC are dropped when a band is set. */
+  min_mc_usd?: number;
+  /** Maximum market cap at the first KOL buy (USD). */
+  max_mc_usd?: number;
+}
+
+/** One KOL's leg of a coordinated cohort. */
+export interface RhcCoordinationKol {
+  evm_address: string;
+  name: string | null;
+  twitter_url: string | null;
+  buy_eth: number;
+  sell_eth: number;
+  /** Sold more ETH than they bought inside the window. */
+  exited: boolean;
+}
+
+/** One coordinated token — bought by `kol_count` distinct KOLs inside the window. */
+export interface RhcCoordinationToken {
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  launchpad: string | null;
+  is_graduated: boolean | null;
+  deployer_tier: DeployerTier | null;
+  token_age_minutes: number | null;
+  /** Distinct KOL buyers in the window (≥ min_kols). */
+  kol_count: number;
+  total_buys: number;
+  buy_eth: number;
+  sell_eth: number;
+  /** buy_eth − sell_eth over the window. */
+  net_eth: number;
+  signal: RhcCoordinationSignal;
+  /** KOLs that sold more than they bought. */
+  exited_count: number;
+  /** kol_count − exited_count. */
+  holders_count: number;
+  first_buy_at: string;
+  last_buy_at: string;
+  /** How fast the cohort piled in — last_buy_at − first_buy_at, seconds. */
+  time_to_consensus_sec: number;
+  market_cap_usd_at_first_buy: number | null;
+  current_mc_usd: number | null;
+  peak_mc_usd: number | null;
+  liquidity_usd: number | null;
+  /** Per-KOL breakdown, largest buyer first. */
+  kols: RhcCoordinationKol[];
+}
+
+export interface RhcKolCoordinationResponse {
+  chain: Chain;
+  coordination: RhcCoordinationToken[];
+  count: number;
+  period: RhcCoordinationPeriod;
+  min_kols: number;
+  _rid?: string;
+}
+
+// ─── KOL first touches (/rhc/kol/first-touches) ──────────────────────────────
+
+export interface RhcFirstTouchesParams {
+  /** Max events (1–100). Default: 50 — clamped to 20 below PRO. */
+  limit?: number;
+  /** Only first-touches strictly newer than this ISO 8601 timestamp (poll forward). */
+  since?: string;
+  /** Cursor — only first-touches strictly older than this ISO 8601 timestamp. Pass `next_before`. */
+  before?: string;
+  /** Minimum first-buy size in ETH (0–100000). */
+  min_eth?: number;
+  /** Only tokens younger than N minutes at first touch (1–43200) — isolates genuinely early calls. */
+  token_age_max_min?: number;
+  /** Filter by launchpad: pons, flap, clanker, hood.fun, noxa, virtuals. */
+  launchpad?: string;
+  /** Minimum market cap at first buy (USD). */
+  min_mc_usd?: number;
+  /** Maximum market cap at first buy (USD). */
+  max_mc_usd?: number;
+}
+
+/** The KOL behind a first touch. `evm_address` is ULTRA/BUSINESS only. */
+export interface RhcFirstTouchKol {
+  /** ULTRA/BUSINESS only — `name` and `twitter_url` are always returned. */
+  evm_address?: string;
+  name: string | null;
+  twitter_url: string | null;
+}
+
+/** The globally earliest KOL buy on a token — the discovery signal. */
+export interface RhcFirstTouch {
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  launchpad: string | null;
+  is_graduated: boolean | null;
+  first_buy_at: string;
+  /** Entry size in ETH. */
+  eth_amount: number | null;
+  token_amount: number | null;
+  tx_hash: string;
+  /** Token age at the first touch, minutes. */
+  token_age_minutes: number | null;
+  market_cap_usd_at_first_buy: number | null;
+  price_usd_at_first_buy: number | null;
+  current_mc_usd: number | null;
+  peak_mc_usd: number | null;
+  first_kol: RhcFirstTouchKol;
+}
+
+export interface RhcKolFirstTouchesResponse {
+  chain: Chain;
+  events: RhcFirstTouch[];
+  count: number;
+  /** Cursor for the next page — pass as `before` to fetch older first-touches. */
+  next_before: string | null;
+  /** Age of the newest event, seconds. */
+  data_age_seconds: number | null;
+  _rid?: string;
+}
+
 // ─── DEX trade tape (/rhc/trades) ────────────────────────────────────────────
 
 export interface RhcTradesParams {
@@ -522,6 +655,74 @@ export interface RhcBuyerQualityResponse {
   _rid?: string;
 }
 
+// ─── Token batch (POST /rhc/token/batch) ─────────────────────────────────────
+
+/** Deployer reputation attached to a batch entry. The rate fields are absent when the deployer has no reputation row yet. */
+export interface RhcBatchTokenDeployer {
+  address: string;
+  /** How the deployer was attributed (e.g. the launchpad's factory event). */
+  source: string | null;
+  tier?: DeployerTier;
+  tokens_deployed?: number;
+  graduated?: number;
+  graduation_rate?: number;
+  runners?: number;
+  runner_rate?: number;
+}
+
+/** One entry of a `POST /rhc/token/batch` response. Unknown addresses come back as `found: false`. */
+export type RhcBatchToken =
+  | { address: string; found: false }
+  | {
+      address: string;
+      found: true;
+      symbol: string | null;
+      name: string | null;
+      decimals: number | null;
+      launchpad: string | null;
+      is_graduated: boolean | null;
+      graduated_at: string | null;
+      first_seen_at: string | null;
+      price_usd: number | null;
+      market_cap_usd: number | null;
+      fdv_usd: number | null;
+      liquidity_usd: number | null;
+      peak_mc_usd: number | null;
+      peak_mc_at: string | null;
+      primary_dex: string | null;
+      last_trade_time: string | null;
+      deployer: RhcBatchTokenDeployer | null;
+    };
+
+export interface RhcTokenBatchResponse {
+  chain: Chain;
+  /** One entry per REQUESTED address, in order, after de-duplication. */
+  tokens: RhcBatchToken[];
+  /** Address count AFTER de-duplication. */
+  requested: number;
+  found: number;
+  _rid?: string;
+}
+
+// ─── Batch buyer quality (POST /rhc/tokens/batch/buyer-quality) ──────────────
+
+/** One entry of a batch buyer-quality response — a score, or a per-token error. */
+export type RhcBatchBuyerQuality =
+  | RhcBuyerQualityResponse
+  | { chain: Chain; token_address: string; error: string };
+
+export interface RhcBatchBuyerQualityResponse {
+  chain: Chain;
+  tokens: RhcBatchBuyerQuality[];
+  requested: number;
+  /** Entries that scored (the rest carry `error`). */
+  scored: number;
+  /** Hard cap of 20 — lower than the Solana batch cap of 50, echoed so a rejected batch shows why. */
+  max_addresses: number;
+  coverage?: RhcBuyerQualityCoverage;
+  _rid?: string;
+}
+
 // ─── Launch-bundle detection (/rhc/tokens/{address}/bundle) ──────────────────
 
 /** Robinhood Chain is an Arbitrum Orbit L2 with no atomic multi-signer tx — so no `atomic_tx` kind. */
@@ -608,6 +809,7 @@ export interface RhcDeployerLeaderboardRow {
   launchpads: string[];
   first_deploy_at: string | null;
   last_deploy_at: string | null;
+  /** Scored on `runner_rate` + 24h of deployer history — NOT on `graduation_rate` (only `spammer` still keys off that). */
   tier: DeployerTier;
 }
 
@@ -665,6 +867,323 @@ export interface RhcDeployerProfileResponse {
   recent_tokens: RhcDeployerToken[];
   /** Rows returned (capped at 50) — the true total is deployer.tokens_deployed. */
   recent_tokens_count: number;
+  _rid?: string;
+}
+
+// ─── Deployer trajectory (/rhc/deployer-hunter/{address}/trajectory) ─────────
+
+/**
+ * Compact reputation row echoed by the trajectory / tokens routes.
+ *
+ * `tier` rides `runner_rate` (the $100K bar) and requires 24h of deployer history
+ * (migrations 267 + 269). `graduation_rate` still means the $40K bar and is still
+ * returned, but it no longer sets the tier — only `spammer` still keys off it.
+ */
+export interface RhcDeployerSummary {
+  deployer_address: string;
+  tokens_deployed: number;
+  /** Tokens that reached a $40K+ peak MC. */
+  graduated: number;
+  graduation_rate: number;
+  /** Tokens that peaked ≥ $100K MC — the metric the tier is scored on. */
+  runners: number;
+  runner_rate: number;
+  tier: DeployerTier;
+}
+
+/** Trailing run in the deployer's chronological launch history. */
+export interface RhcDeployerStreak {
+  type: "bond" | "fail" | "none";
+  count: number;
+}
+
+/** A 10-launch window of the rolling success curve. */
+export interface RhcDeployerRollingRate {
+  /** 1-based index of the last launch in the window. */
+  window_end: number;
+  /** Share of the window that graduated, 0–1. */
+  bond_rate: number;
+}
+
+export interface RhcDeployerStretch {
+  start_index: number;
+  end_index: number;
+  bond_rate: number;
+}
+
+export interface RhcDeployerTrajectory {
+  current_streak: RhcDeployerStreak;
+  longest_bond_streak: number;
+  longest_fail_streak: number;
+  /** Rolling 10-launch success rates, oldest window first. Empty below 10 launches. */
+  rolling_bond_rates: RhcDeployerRollingRate[];
+  /** Most recent rolling window vs the lifetime rate (±0.05 band). */
+  trend: "improving" | "declining" | "stable";
+  avg_days_between_deploys: number | null;
+  /** Launches burned between a miss and the next hit. */
+  avg_recovery_tokens: number | null;
+  best_stretch: RhcDeployerStretch | null;
+  worst_stretch: RhcDeployerStretch | null;
+  total_tokens_analyzed: number;
+}
+
+export interface RhcDeployerTrajectoryResponse {
+  chain: Chain;
+  /** False if this wallet has never deployed a tracked token (deployer + trajectory are then null). */
+  is_deployer: boolean;
+  address: string;
+  deployer: RhcDeployerSummary | null;
+  /** States what the `bond` wording actually counted — "graduated ($40K+ peak market cap)". */
+  success_metric?: string;
+  trajectory: RhcDeployerTrajectory | null;
+  /** True when the 500-token analysis cap was hit — the curve is partial. */
+  truncated?: boolean;
+  _rid?: string;
+}
+
+// ─── Deployer launch history (/rhc/deployer-hunter/{address}/tokens) ─────────
+
+export type RhcDeployerTokensSort = "first_seen_at" | "peak_mc_usd";
+
+export interface RhcDeployerTokensParams {
+  /** Page size (1–100). Default: 50. */
+  limit?: number;
+  /** Page offset (0–10000). Default: 0. */
+  offset?: number;
+  /** Ordering. Default: "first_seen_at" (newest first). `peak_mc_usd` sorts the fetched PAGE only. */
+  sort?: RhcDeployerTokensSort;
+}
+
+/** One launch in a deployer's paginated history. */
+export interface RhcDeployerTokenRow {
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  launchpad: string | null;
+  /** How the deployer was attributed for this token. */
+  deployer_source: string | null;
+  is_graduated: boolean | null;
+  graduated_at: string | null;
+  first_seen_at: string | null;
+  market_cap_usd: number | null;
+  peak_mc_usd: number | null;
+  peak_mc_at: string | null;
+  liquidity_usd: number | null;
+}
+
+export interface RhcDeployerTokensResponse {
+  chain: Chain;
+  is_deployer: boolean;
+  address: string;
+  deployer: RhcDeployerSummary | null;
+  tokens: RhcDeployerTokenRow[];
+  /** Lifetime launch count (deployer.tokens_deployed), not the page size. */
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  sort?: RhcDeployerTokensSort;
+  /** `page` when sort=peak_mc_usd — that ordering is applied to the fetched page only. */
+  sort_scope?: "page";
+  _rid?: string;
+}
+
+// ─── Best tokens (/rhc/deployer-hunter/best-tokens) ──────────────────────────
+
+export type RhcBestTokensPeriod = "24h" | "7d" | "30d" | "all";
+
+export interface RhcBestTokensParams {
+  /** Launch window. Default: "7d". */
+  period?: RhcBestTokensPeriod;
+  /** Max tokens (1–50). Default: 10. */
+  limit?: number;
+}
+
+export interface RhcBestToken {
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  launchpad: string | null;
+  first_seen_at: string | null;
+  is_graduated: boolean | null;
+  market_cap_usd: number | null;
+  peak_mc_usd: number | null;
+  peak_mc_at: string | null;
+  liquidity_usd: number | null;
+  /** The reputable deployer behind the launch. */
+  deployer: {
+    address: string;
+    tier: "elite" | "good";
+    graduation_rate: number;
+    runner_rate: number;
+    tokens_deployed: number;
+  } | null;
+}
+
+export interface RhcBestTokensResponse {
+  chain: Chain;
+  /** Ranked by peak MC, highest first. */
+  tokens: RhcBestToken[];
+  period: RhcBestTokensPeriod;
+  limit: number;
+  /** Size of the elite+good population the ranking drew from. */
+  reputable_deployers: number;
+  /** Launches considered before ranking. */
+  candidates_scanned?: number;
+  /** True when the 1000-candidate scan cap was hit — the top-N is drawn from the most RECENT launches. */
+  truncated?: boolean;
+  _rid?: string;
+}
+
+// ─── Deployer stats (/rhc/deployer-hunter/stats) ─────────────────────────────
+
+export interface RhcDeployerStatsResponse {
+  chain: Chain;
+  total_deployers: number;
+  total_tokens: number;
+  /** elite + good. */
+  reputable_deployers: number;
+  by_tier: Record<string, { deployers: number; tokens: number }>;
+  /** Share of all indexed tokens deployed by spammers, 0–1. */
+  spam_token_share: number | null;
+  alerts_24h: number;
+  alerts_7d: number;
+  /** The thresholds actually in force — elite/good ride runner_rate + 24h of history, spammer keys off graduation_rate. */
+  tier_rules: Record<string, string>;
+  /** "peak market cap >= $40,000". */
+  graduation_definition: string;
+  /** "peak market cap >= $100,000". */
+  runner_definition: string;
+  _rid?: string;
+}
+
+// ─── Deployer alerts (/rhc/deployer-hunter/alerts) ───────────────────────────
+
+export type RhcAlertType = "new_deploy" | "graduated";
+/** RHC alert priorities — no `low`, unlike Solana. */
+export type RhcAlertPriority = "high" | "medium";
+
+export interface RhcDeployerAlertsParams {
+  /** Filter on the RESOLVED (read-time) tier, not the snapshot. */
+  deployer_tier?: DeployerTier;
+  priority?: RhcAlertPriority;
+  alert_type?: RhcAlertType;
+  /** Filter by launchpad (1–32 chars). */
+  launchpad?: string;
+  /** Minimum market cap at alert time (USD). */
+  min_mc?: number;
+  /** Max alerts (1–500). Default: 50 — BASIC/PRO are capped at 50, only ULTRA gets the full limit. */
+  limit?: number;
+  /** Page offset (0–10000). Default: 0. Ignored when `before` is set. */
+  offset?: number;
+  /** Poll forward — only alerts with `event_at` strictly newer than this ISO 8601 timestamp. Pass `next_event_at`. */
+  since?: string;
+  /** Page back — only alerts strictly older than this ISO 8601 timestamp. Pass `next_before`. Takes precedence over `offset`. */
+  before?: string;
+  /** Disables the default $100 liquidity gate and returns the raw tape. */
+  include_untradeable?: boolean;
+}
+
+/** One deployer alert. `tier` is resolved at READ time; `tier_at_alert` is the snapshot taken when it fired. */
+export interface RhcDeployerAlert {
+  id: string;
+  deployer_address: string;
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  alert_type: RhcAlertType;
+  title: string | null;
+  /** Restated at read time in terms of `runner_rate` — the metric that actually sets the tier. */
+  message: string | null;
+  launchpad: string | null;
+  /** The deployer's CURRENT tier, from the live reputation view. */
+  tier: DeployerTier | null;
+  /** The tier stored when the alert fired. */
+  tier_at_alert: DeployerTier | null;
+  /** True when the deployer's tier changed since the alert fired. */
+  tier_is_stale: boolean;
+  mc_at_alert: number | null;
+  current_mc_usd: number | null;
+  liquidity_usd: number | null;
+  priority: RhcAlertPriority;
+  is_active: boolean;
+  created_at: string;
+  event_at: string | null;
+}
+
+export interface RhcDeployerAlertsResponse {
+  chain: Chain;
+  alerts: RhcDeployerAlert[];
+  limit: number;
+  offset: number;
+  /** Echoes whether the default liquidity gate ran — `liquidity_usd >= $100` or `off (include_untradeable=true)`. */
+  tradability_filter: string;
+  /** Newest `event_at` on this page — pass back as `since` to poll forward. */
+  next_event_at: string | null;
+  /** Oldest `event_at` on this page — pass as `before` to page back. */
+  next_before: string | null;
+  /** Age of the newest alert, seconds. */
+  data_age_seconds: number | null;
+  _rid?: string;
+}
+
+// ─── Deployer history (/rhc/deployer-hunter/{address}/history) ───────────────
+
+export interface RhcDeployerHistoryParams {
+  /** Page size (1–1000). Default: 100. */
+  limit?: number;
+  /** Page offset (0–100000). Default: 0. */
+  offset?: number;
+}
+
+export interface RhcDeployerHistoryResponse {
+  chain: Chain;
+  is_deployer: boolean;
+  address: string;
+  deployer: RhcDeployerReputation | null;
+  tokens: RhcDeployerToken[];
+  /** Exact lifetime launch count. */
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  _rid?: string;
+}
+
+// ─── Recent graduations (/rhc/deployer-hunter/recent-bonds) ──────────────────
+
+export interface RhcRecentBondsParams {
+  /** Filter by the token deployer's tier. */
+  deployer_tier?: DeployerTier;
+  /** Raise the peak-MC floor (USD). Never lowers it below the $40K graduation milestone. */
+  min_peak?: number;
+  /** Max tokens (1–200). Default: 50. */
+  limit?: number;
+}
+
+export interface RhcRecentBondToken {
+  address: string;
+  symbol: string | null;
+  name: string | null;
+  launchpad: string | null;
+  is_graduated: boolean | null;
+  deployer_address: string | null;
+  deployer_tier: DeployerTier | null;
+  first_seen_at: string | null;
+  market_cap_usd: number | null;
+  peak_mc_usd: number | null;
+  peak_mc_at: string | null;
+}
+
+export interface RhcRecentBondsResponse {
+  chain: Chain;
+  /** The milestone that defines a graduation on this chain — 40000 USD peak MC. */
+  graduation_mc: number;
+  /** Newest peak first. */
+  tokens: RhcRecentBondToken[];
+  limit: number;
+  /** Newest `peak_mc_at` on this page (informational). */
+  next_peak_mc_at: string | null;
   _rid?: string;
 }
 
@@ -753,7 +1272,7 @@ export interface StreamToken {
 export interface RobinhoodConfig {
   /**
    * MadeOnSol API key (starts with `msk_`). The same key works across every tier.
-   * Get a free key at https://madeonsol.com/developer
+   * Get a key at https://madeonsol.com/pricing (3-day free trial on Pro/Ultra).
    */
   apiKey: string;
   /** Max automatic retries on 429 / 5xx / network error (default: 2). */
@@ -822,12 +1341,40 @@ class KolClient {
   wallet(wallet: string): Promise<RhcKolProfileResponse> {
     return this._fetch(buildUrl(this._baseUrl, `/rhc/kol/${encodeURIComponent(wallet)}`));
   }
+
+  /**
+   * KOL clustering — tokens bought by `min_kols`+ DISTINCT tracked KOLs inside
+   * the window, ranked by KOL count then buy volume. Deeper than `hotTokens()`:
+   * each row carries the per-KOL breakdown, net ETH flow, an accumulating vs
+   * distributing signal, exit state, and how fast the cohort piled in
+   * (`time_to_consensus_sec`). Tier: **BASIC**.
+   * @param params Optional: period (1h/6h/24h/7d, default 24h), min_kols (2–50), limit (1–50), min_mc_usd / max_mc_usd (MC at the FIRST KOL buy).
+   */
+  coordination(params?: RhcKolCoordinationParams): Promise<RhcKolCoordinationResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/kol/coordination", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * First touches — the globally earliest buy by ANY tracked KOL per token, the
+   * discovery signal. Each event carries the entry size in ETH, the MC at entry,
+   * and the current + peak MC so you can score how the call aged. `limit` is
+   * clamped to 20 below PRO, and `first_kol.evm_address` is ULTRA-only.
+   * Tier: **BASIC**.
+   * @param params Optional: limit, since, before cursor, min_eth, token_age_max_min, launchpad, min_mc_usd / max_mc_usd.
+   */
+  firstTouches(params?: RhcFirstTouchesParams): Promise<RhcKolFirstTouchesResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/kol/first-touches", params as Record<string, string | number | undefined>));
+  }
 }
 
 // ─── Tokens namespace (client.tokens) ────────────────────────────────────────
 
 class TokensClient {
-  constructor(private readonly _fetch: <T>(url: string) => Promise<T>, private readonly _baseUrl: string) {}
+  constructor(
+    private readonly _fetch: <T>(url: string) => Promise<T>,
+    private readonly _baseUrl: string,
+    private readonly _post: <T>(url: string, body?: unknown) => Promise<T>,
+  ) {}
 
   /**
    * Robinhood Chain token discovery — live-priced tokens with MC, liquidity,
@@ -887,6 +1434,34 @@ class TokensClient {
   bundle(address: string): Promise<RhcBundleResponse> {
     return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/bundle`));
   }
+
+  /**
+   * Up to 50 tokens in ONE call — metadata, live price/MC/FDV/liquidity, peak MC,
+   * primary DEX, and the deployer reputation block. Set-based server-side (three
+   * queries regardless of batch size), not a fan-out of `get()`. Every requested
+   * address is echoed back — unknown ones as `{ found: false }` — so positions
+   * line up with what you sent. Narrower than `get()` on purpose: it does NOT
+   * bundle buyer-quality; use `batchBuyerQuality()` for that. Tier: **BASIC**.
+   * @param addresses 1–50 token addresses (0x, 40 hex). Duplicates are de-duplicated server-side.
+   */
+  batch(addresses: string[]): Promise<RhcTokenBatchResponse> {
+    return this._post(buildUrl(this._baseUrl, "/rhc/token/batch"), { addresses });
+  }
+
+  /**
+   * Early-buyer quality for several tokens in one call — the batched form of
+   * `buyerQuality()`. A token that fails to score degrades to an entry carrying
+   * `error` instead of failing the batch. Tier: **BASIC**.
+   *
+   * **The cap is 20, not the Solana batch cap of 50** — RHC buyer-quality is a
+   * per-token cohort computation (ordered early-buyer scan + bundle detection +
+   * alpha/cluster joins), not one set-based query, so 50 would mean ~200
+   * round-trips behind a single request. The cap is echoed as `max_addresses`.
+   * @param addresses 1–20 token addresses (0x, 40 hex).
+   */
+  batchBuyerQuality(addresses: string[]): Promise<RhcBatchBuyerQualityResponse> {
+    return this._post(buildUrl(this._baseUrl, "/rhc/tokens/batch/buyer-quality"), { addresses });
+  }
 }
 
 // ─── Deployer Hunter namespace (client.deployerHunter) ───────────────────────
@@ -897,6 +1472,13 @@ class DeployerHunterClient {
   /**
    * Deployer reputation leaderboard — ranked over a 5-min-refresh rollup of every
    * launchpad token indexed (40k+ deployers). Tier: **BASIC**.
+   *
+   * Tier semantics (migrations 267 + 269): `elite` / `good` are earned on the
+   * $100K `runner_rate` **and** require 24h of deployer history — the $40K bar
+   * proved farmable by operators mass-relaunching one ticker across rotating
+   * wallets. `graduation_rate` still means the $40K bar and is still returned,
+   * but it no longer sets the tier; `spammer` is the one label that still keys
+   * off it. Call `stats()` for the thresholds in force.
    * @param params Optional: sort, tier, min_tokens, limit (1–50), offset.
    */
   leaderboard(params?: RhcDeployerLeaderboardParams): Promise<RhcDeployerLeaderboardResponse> {
@@ -911,6 +1493,113 @@ class DeployerHunterClient {
    */
   profile(address: string): Promise<RhcDeployerProfileResponse> {
     return this._fetch(buildUrl(this._baseUrl, `/rhc/deployer-hunter/${encodeURIComponent(address)}`));
+  }
+
+  /**
+   * Is this deployer getting better or worse? Current + longest hit/miss streaks,
+   * a rolling 10-launch success curve, best/worst stretches, deploy cadence, and
+   * how many launches they burn between a miss and the next hit. Tier: **BASIC**.
+   *
+   * The per-token success event is the **$40K peak-MC graduation** (echoed as
+   * `success_metric`), deliberately NOT the $100K runner bar that migrations
+   * 267 + 269 moved TIERS onto — $100K is rare enough that most deployers would
+   * return an all-zero curve, and a trajectory needs events to have a shape.
+   * Analysis is capped at 500 launches; `truncated` says whether the curve is
+   * the whole story. Unknown wallets return 200 with `is_deployer: false`.
+   * @param address Deployer EVM wallet address (0x, 40 hex).
+   */
+  trajectory(address: string): Promise<RhcDeployerTrajectoryResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/deployer-hunter/${encodeURIComponent(address)}/trajectory`));
+  }
+
+  /**
+   * One deployer's full paginated launch history, enriched with live MC, peak MC
+   * and liquidity. `profile()` caps `recent_tokens` at 50 and is a point-in-time
+   * read — this is the enumerable list with limit/offset and `has_more`.
+   * Tier: **BASIC**.
+   *
+   * Note `sort: "peak_mc_usd"` orders the fetched PAGE only (the response echoes
+   * `sort_scope: "page"`), because peak MC lives in another table — it is not a
+   * global top-tokens ranking. Use `bestTokens()` for a real ranking.
+   * @param address Deployer EVM wallet address (0x, 40 hex).
+   * @param params Optional: limit (1–100, default 50), offset, sort (first_seen_at | peak_mc_usd).
+   */
+  tokens(address: string, params?: RhcDeployerTokensParams): Promise<RhcDeployerTokensResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/deployer-hunter/${encodeURIComponent(address)}/tokens`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Full token-deploy history for one deployer plus their reputation row.
+   * Tier: **PRO+** — the point-in-time `profile()` stays BASIC. RHC has no
+   * per-day reputation snapshots, so this is a deploy history, not a daily tier
+   * time-series; for the shape-over-time read use `trajectory()`.
+   * @param address Deployer EVM wallet address (0x, 40 hex).
+   * @param params Optional: limit (1–1000, default 100), offset (0–100000).
+   */
+  history(address: string, params?: RhcDeployerHistoryParams): Promise<RhcDeployerHistoryResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/deployer-hunter/${encodeURIComponent(address)}/history`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * The highest-peaking tokens launched by REPUTABLE (good/elite) deployers in a
+   * window — "what did the deployers worth tracking actually produce". Gated on
+   * reputation rather than raw peak MC; the unfiltered version is
+   * `client.tokens.list({ sort: "peak_mc" })`. Tier: **BASIC**.
+   *
+   * Reputation here is the $100K `runner_rate` tier (+ 24h of deployer history),
+   * not `graduation_rate`. If `truncated` is true the top-N was drawn from the
+   * 1000 most RECENT launches in the period rather than the whole period.
+   * @param params Optional: period (24h/7d/30d/all, default 7d), limit (1–50, default 10).
+   */
+  bestTokens(params?: RhcBestTokensParams): Promise<RhcBestTokensResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/deployer-hunter/best-tokens", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Chain-wide deployer reputation summary — population and token count per tier,
+   * the reputable-deployer count, spam token share, and 24h/7d alert volume: the
+   * denominator for any "is this deployer rare?" question. Tier: **BASIC**.
+   *
+   * Also returns `tier_rules`, the thresholds actually in force, so you can read
+   * what `elite` currently means instead of guessing from the label — `elite` /
+   * `good` are earned on the $100K `runner_rate` plus 24h of deployer history
+   * (migrations 267 + 269), while `spammer` still keys off `graduation_rate`.
+   */
+  stats(): Promise<RhcDeployerStatsResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/deployer-hunter/stats"));
+  }
+
+  /**
+   * Deployer signal feed — new deploys and graduations from tracked deployers,
+   * newest first. Tier: **BASIC** (ULTRA gets the full limit; BASIC/PRO share a
+   * 50-alert cap). Poll forward with `since: next_event_at`, page back with
+   * `before: next_before`.
+   *
+   * Two things worth knowing. **Tradability is filtered by default**: alerts on
+   * tokens with `liquidity_usd` under $100 — unknown liquidity included, since on
+   * RHC that usually means a drained pool — are dropped, because a $45K-MC alert
+   * on a $68 pool is not a signal. Pass `include_untradeable: true` for the raw
+   * tape; the active setting is echoed as `tradability_filter`. And **`tier` is
+   * resolved at read time** from the live reputation view, so an alert can never
+   * advertise a reputation the deployer has since lost — the snapshot comes back
+   * as `tier_at_alert` with `tier_is_stale` flagging drift, and `deployer_tier`
+   * filters on the resolved value.
+   * @param params Optional: deployer_tier, priority, alert_type, launchpad, min_mc, limit, offset, since, before, include_untradeable.
+   */
+  alerts(params?: RhcDeployerAlertsParams): Promise<RhcDeployerAlertsResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/deployer-hunter/alerts", params as Record<string, string | number | boolean | undefined>));
+  }
+
+  /**
+   * Recent graduations, newest peak first, with token metadata and the deployer's
+   * tier. On RHC a graduation is the **$40K peak-MC milestone**, not a
+   * bonding-curve completion — noxa/pons/clanker launch direct-to-DEX with no
+   * curve — so the set is defined purely by peak MC. `min_peak` only raises that
+   * floor. Tier: **BASIC**.
+   * @param params Optional: deployer_tier, min_peak, limit (1–200, default 50).
+   */
+  recentBonds(params?: RhcRecentBondsParams): Promise<RhcRecentBondsResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/deployer-hunter/recent-bonds", params as Record<string, string | number | undefined>));
   }
 }
 
@@ -950,10 +1639,11 @@ class StreamClient {
 /**
  * Robinhood Chain API client (chain id 4663).
  *
- * EVM-native on-chain trading intelligence — live KOL trades, token discovery
- * & bundles, the DEX trade tape, OHLC candles, deployer reputation, and
- * smart-money wallets. Authenticate with a MadeOnSol `msk_` key (same key, same
- * base URL as the Solana API — Robinhood Chain is bundled into every tier).
+ * All 25 Robinhood Chain endpoints: EVM-native on-chain trading intelligence —
+ * live KOL trades and coordination, token discovery & bundles, the DEX trade
+ * tape, OHLC candles, deployer reputation, and smart-money wallets.
+ * Authenticate with a MadeOnSol `msk_` key (same key, same base URL as the
+ * Solana API — Robinhood Chain is bundled into every tier).
  *
  * @example
  * ```ts
@@ -967,11 +1657,11 @@ class StreamClient {
  * ```
  */
 export class RobinhoodClient {
-  /** KOL trade intelligence on Robinhood Chain — feed, leaderboard, hot tokens, per-wallet profile. */
+  /** KOL trade intelligence on Robinhood Chain — feed, leaderboard, hot tokens, per-wallet profile, coordination, first touches. */
   readonly kol: KolClient;
-  /** Token intelligence — discovery, per-token snapshot, candles, KOL consensus, buyer quality, launch bundle. */
+  /** Token intelligence — discovery, per-token snapshot, candles, KOL consensus, buyer quality, launch bundle, batch reads. */
   readonly tokens: TokensClient;
-  /** Deployer reputation — leaderboard + per-deployer profile. */
+  /** Deployer reputation — leaderboard, profile, trajectory, launch history, best tokens, chain stats, alerts, recent graduations. */
   readonly deployerHunter: DeployerHunterClient;
   /** Managed WebSocket streaming (rhc:kol_trades, rhc:trades) — PRO+. */
   readonly stream: StreamClient;
@@ -984,11 +1674,11 @@ export class RobinhoodClient {
     if (!config || !config.apiKey || typeof config.apiKey !== "string") {
       console.error(
         "\n[robinhood-chain-sdk] Missing API key.\n" +
-        "  → Get a free key (no card) at https://madeonsol.com/developer\n" +
+        "  → Get a key at https://madeonsol.com/pricing (3-day free trial on Pro/Ultra)\n" +
         "  → Then: new RobinhoodClient({ apiKey: process.env.MADEONSOL_API_KEY })\n",
       );
       throw new Error(
-        "RobinhoodClient: apiKey is required. Get a free key at https://madeonsol.com/developer",
+        "RobinhoodClient: apiKey is required. Get a key at https://madeonsol.com/pricing",
       );
     }
     this._apiKey = config.apiKey;
@@ -999,7 +1689,7 @@ export class RobinhoodClient {
     const boundPost = ((url: string, body?: unknown) => this._requestWithBody("POST", url, body)) as <T>(url: string, body?: unknown) => Promise<T>;
 
     this.kol = new KolClient(boundGet, this._baseUrl);
-    this.tokens = new TokensClient(boundGet, this._baseUrl);
+    this.tokens = new TokensClient(boundGet, this._baseUrl, boundPost);
     this.deployerHunter = new DeployerHunterClient(boundGet, this._baseUrl);
     this.stream = new StreamClient(boundPost, this._baseUrl);
   }
