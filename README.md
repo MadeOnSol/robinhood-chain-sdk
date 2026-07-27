@@ -402,9 +402,8 @@ Fully-typed responses and params for all 25 endpoints are exported (`RhcKolFeedR
 ## Links
 
 - **Robinhood Chain** — [madeonsol.com/robinhood](https://madeonsol.com/robinhood)
-- **Pricing** — [madeonsol.com/pricing](https://madeonsol.com/pricing) (Robinhood Chain bundled into every tier)
+- **Pricing & free API key** — [madeonsol.com/pricing](https://madeonsol.com/pricing) (Robinhood Chain bundled into every tier)
 - **API docs** — [madeonsol.com/api-docs](https://madeonsol.com/api-docs)
-- **Get a free key** — [madeonsol.com/pricing](https://madeonsol.com/pricing)
 - **npm** — [robinhood-chain-sdk](https://www.npmjs.com/package/robinhood-chain-sdk)
 - **GitHub** — [madeonsol/robinhood-chain-sdk](https://github.com/madeonsol/robinhood-chain-sdk)
 
