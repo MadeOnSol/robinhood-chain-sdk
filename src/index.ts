@@ -770,6 +770,279 @@ export interface RhcBundleResponse {
   _rid?: string;
 }
 
+// ─── Top traders (/rhc/tokens/{address}/top-traders) ─────────────────────────
+
+export interface RhcTopTradersParams {
+  /** Rows to return. Capped at 50 on PRO, 200 on ULTRA/BUSINESS. Default: 50. */
+  limit?: number;
+  /** Page offset (0–10000). Default: 0. */
+  offset?: number;
+}
+
+export interface RhcTopTrader {
+  /** Trader address (lowercase 0x). */
+  trader_eoa: string;
+  buy_eth: number | null;
+  sell_eth: number | null;
+  /**
+   * REALIZED ETH flow: sell_eth − buy_eth. This is NOT PnL — it does not value
+   * the trader's remaining bag, so a wallet that bought and still holds ranks
+   * last. For FIFO cost-basis PnL use `wallet.pnl()`.
+   */
+  net_eth: number | null;
+  trades: number;
+  last_trade_at: string | null;
+  /** Mean market cap (USD) at the time of this trader's trades. */
+  avg_trade_mc: number | null;
+  /** Wallet-level historical win-rate [0,1]. */
+  win_rate: number | null;
+  likely_bot: boolean | null;
+  is_known_kol: boolean | null;
+  /** Null when the KOL is tracked but has no name recorded. */
+  kol_name: string | null;
+  /** Trader's net across ALL tokens, for context. */
+  wallet_net_eth: number | null;
+  wallet_tokens: number | null;
+  /** Dump-cluster cohort count; >0 means a recycled dumper. */
+  dump_cohorts: number | null;
+  /** 1–20 when this trader was among the token's earliest buyers. */
+  early_buyer_rank: number | null;
+}
+
+export interface RhcTopTradersResponse {
+  chain: Chain;
+  token_address: string;
+  traders: RhcTopTrader[];
+  count: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  /** States the net_eth semantics explicitly. */
+  metric: string;
+  _rid?: string;
+}
+
+// ─── Cohort flow (/rhc/tokens/{address}/flow) ────────────────────────────────
+
+export type RhcFlowWindow = "1h" | "6h" | "24h" | "7d";
+
+/**
+ * Cohorts are mutually exclusive and assigned by a priority ladder in this
+ * order. `smart_money` is derived (win-rate ≥ 0.5 and net positive), not a
+ * stored label. `unprofiled` is a real answer — the trader has not met the
+ * reputation thresholds. There is no `fresh_wallet` cohort because Robinhood
+ * Chain stores no wallet-level first-seen.
+ */
+export type RhcFlowCohortName =
+  | "kol"
+  | "bot"
+  | "dump_cluster"
+  | "early_buyer"
+  | "unprofiled"
+  | "smart_money"
+  | "retail";
+
+export interface RhcFlowCohort {
+  cohort: RhcFlowCohortName;
+  traders: number;
+  trades: number;
+  buy_eth: number;
+  sell_eth: number;
+  /** sell − buy. POSITIVE = the cohort DISTRIBUTED; negative = accumulated. */
+  net_eth: number;
+}
+
+export interface RhcFlowResponse {
+  chain: Chain;
+  token_address: string;
+  window: RhcFlowWindow;
+  cohorts: RhcFlowCohort[];
+  totals: {
+    traders: number;
+    trades: number;
+    buy_eth: number;
+    sell_eth: number;
+    net_eth: number;
+  };
+  sign_convention: string;
+  _rid?: string;
+}
+
+// ─── Peak history (/rhc/tokens/{address}/peak-history) ────────────────────────
+
+export type RhcPeakWindow = "24h" | "7d" | "30d" | "all";
+
+export interface RhcPeakHistoryParams {
+  /** Curve window. Default: "7d". */
+  window?: RhcPeakWindow;
+  /** Set "false" to skip the series and return only the peak summary. */
+  curve?: "true" | "false";
+}
+
+export interface RhcPeakCurvePoint {
+  bucket_start: string;
+  high_mc_usd: number | null;
+  close_mc_usd: number | null;
+  close_price_usd: number | null;
+  volume_usd: number | null;
+  trades: number | null;
+  /** Running high-water mark — monotonically non-decreasing by construction. */
+  running_peak_mc: number | null;
+}
+
+export interface RhcPeakHistoryResponse {
+  chain: Chain;
+  token_address: string;
+  name: string | null;
+  symbol: string | null;
+  launchpad: string | null;
+  is_graduated: boolean | null;
+  first_seen_at: string | null;
+  current: {
+    market_cap_usd: number | null;
+    liquidity_usd: number | null;
+    last_price_usd: number | null;
+    fdv_usd: number | null;
+    last_trade_time: string | null;
+  };
+  peak: {
+    /**
+     * The stored high-water mark. This is the value every OTHER Robinhood Chain
+     * surface keys off (deployer runner-rate, the $40K graduation bar). It is
+     * sampled from write batches, so it can UNDERCOUNT an intra-batch spike.
+     */
+    peak_mc_usd_recorded: number | null;
+    peak_mc_at_recorded: string | null;
+    /** Max of 1-minute candle highs — trade-level truth, always ≥ recorded. */
+    peak_mc_usd_observed: number | null;
+    peak_mc_at_observed: string | null;
+    /** False when candle history starts after the token did (candles begin 2026-07-15). */
+    observed_covers_full_history: boolean;
+    pct_of_peak: number | null;
+    drawdown_from_peak: number | null;
+  };
+  curve: {
+    window: RhcPeakWindow;
+    /** Server-chosen bin size (1m/5m/15m/1h/4h) so the series stays bounded. */
+    bucket: string;
+    from: string;
+    points: RhcPeakCurvePoint[];
+    count: number;
+    ohlc_history_starts: string | null;
+  };
+  notes: string;
+  _rid?: string;
+}
+
+// ─── Risk (/rhc/tokens/{address}/risk) ───────────────────────────────────────
+
+export type RhcProxyKind = "none" | "eip1167_minimal" | "eip1967" | "eip1967_beacon" | "legacy";
+/** `none` = no owner function exists at all, which is NOT the same as renounced. */
+export type RhcOwnerModel = "none" | "renounced" | "eoa" | "contract";
+export type RhcSellable = "yes" | "no" | "unknown";
+export type RhcLpCustody = "burned" | "locked" | "at_risk" | "unknown";
+
+export interface RhcRiskResponse {
+  chain: Chain;
+  token_address: string;
+  /** Computed live at the chain head — never cached. */
+  checked_at: string;
+  code_size: number;
+  is_contract: boolean;
+  proxy: {
+    kind: RhcProxyKind;
+    implementation: string | null;
+    admin: string | null;
+    /** False for eip1167_minimal — the target is baked into immutable code. */
+    upgradeable: boolean;
+  };
+  owner: { model: RhcOwnerModel; address: string | null };
+  capabilities: {
+    can_mint: boolean;
+    can_pause: boolean;
+    has_access_control: boolean;
+    selectors_found: string[];
+  };
+  liquidity: {
+    primary_pool: string | null;
+    dex: string | null;
+    /** Read only for uniswap-v2; v3/v4 LP sits in an NFT and reports "unknown". */
+    lp_custody: RhcLpCustody;
+    lp_burned_pct: number | null;
+  };
+  /** Simulated live through the router with state overrides. */
+  sellability: { sellable: RhcSellable; reason: string | null };
+  flags: string[];
+  /** 0–100, conservative. Absence of evidence is not evidence of safety. */
+  score: number | null;
+  coverage: { model: string; note: string };
+  _rid?: string;
+}
+
+// ─── Holders (/rhc/tokens/{address}/holders) ─────────────────────────────────
+
+export interface RhcHoldersParams {
+  /** Rows to return. Capped at 50 on PRO, 200 on ULTRA/BUSINESS. Default: 50. */
+  limit?: number;
+  /** Page offset (0–10000). Default: 0. */
+  offset?: number;
+}
+
+export interface RhcHolder {
+  holder: string;
+  /** Raw uint256 as a decimal STRING — never a number; these exceed 2^53. */
+  balance: string;
+  /** Share of circulating supply (pools and burns excluded), [0,1]. */
+  share: number | null;
+  last_block: number | null;
+  is_pool: boolean;
+  is_burn: boolean;
+  is_deployer: boolean;
+}
+
+export interface RhcHoldersResponse {
+  chain: Chain;
+  token_address: string;
+  /**
+   * TRUE only when the reconstructed supply equals on-chain totalSupply() at a
+   * pinned block. Check this before relying on the numbers.
+   */
+  verified: boolean;
+  unverified_reason: string | null;
+  holders: RhcHolder[];
+  count: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  /** Pools and burns are EXCLUDED from the circulating denominator. */
+  concentration: {
+    holder_count: number | null;
+    circulating: string | null;
+    top1_share: number | null;
+    top10_share: number | null;
+    top50_share: number | null;
+    hhi: number | null;
+    pool_held_pct: number | null;
+    burned_pct: number | null;
+    deployer_pct: number | null;
+  } | null;
+  reconciliation: {
+    recon_ok: boolean;
+    recon_supply: string | null;
+    chain_supply: string | null;
+    recon_block: number | null;
+    checked_at: string | null;
+  } | null;
+  source: {
+    method: string;
+    scanned_to_block: number | null;
+    backfill_complete: boolean;
+    last_sweep_at: string | null;
+    note: string;
+  };
+  _rid?: string;
+}
+
 // ─── Deployer leaderboard (/rhc/deployer-hunter/leaderboard) ─────────────────
 
 export type RhcDeployerSort =
@@ -1433,6 +1706,83 @@ class TokensClient {
    */
   bundle(address: string): Promise<RhcBundleResponse> {
     return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/bundle`));
+  }
+
+  /**
+   * Top traders of one token, ranked by REALIZED ETH flow (sell − buy).
+   *
+   * `net_eth` is not PnL: it does not value a trader's remaining bag, so a wallet
+   * that bought and still holds ranks last. Use `wallet.pnl()` for FIFO
+   * cost-basis PnL. Rows are enriched with wallet reputation (win-rate, bot
+   * heuristic, KOL identity), dump-cluster membership and early-buyer rank.
+   * Tier: **PRO+** (50 rows; ULTRA/BUSINESS raises the cap to 200).
+   * @param address Token address (0x, 40 hex).
+   */
+  topTraders(address: string, params?: RhcTopTradersParams): Promise<RhcTopTradersResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/top-traders`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Net buy/sell flow split by mutually-exclusive trader cohort.
+   *
+   * Sign convention: `net_eth = sell − buy`, so a POSITIVE value means the cohort
+   * DISTRIBUTED (took ETH out) and negative means it accumulated. Cohort ladder
+   * order is the priority order: kol → bot → dump_cluster → early_buyer →
+   * unprofiled → smart_money → retail. Tier: **PRO+**.
+   * @param address Token address (0x, 40 hex).
+   * @param window Lookback window. Default "24h".
+   */
+  flow(address: string, window?: RhcFlowWindow): Promise<RhcFlowResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/flow`, { window }));
+  }
+
+  /**
+   * Peak market cap, drawdown from peak, and the running high-water curve.
+   *
+   * Returns TWO peaks because they disagree: `peak_mc_usd_recorded` is the stored
+   * high-water mark that deployer runner-rate and the $40K graduation bar key
+   * off, and `peak_mc_usd_observed` is the max of 1-minute candle highs —
+   * trade-level truth, always ≥ recorded, because the recorded value is sampled
+   * from write batches and can miss an intra-batch spike. Candle history starts
+   * 2026-07-15; `observed_covers_full_history` says whether the observed figure
+   * spans the token's whole life. Tier: **PRO+**.
+   * @param address Token address (0x, 40 hex).
+   */
+  peakHistory(address: string, params?: RhcPeakHistoryParams): Promise<RhcPeakHistoryResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/peak-history`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * EVM-native risk assessment, computed LIVE against the Robinhood Chain node.
+   *
+   * This is NOT the Solana risk model — EVM has no mint or freeze authority, and
+   * only ~2% of Robinhood Chain tokens even expose an owner function, so an
+   * absent capability flag is the norm rather than a safety signal. The
+   * discriminating signals are proxy upgradeability, LP custody and above all
+   * **sellability**, which is simulated at the chain head and never cached
+   * (whether a token can be sold changes the moment an owner flips a setting).
+   * Tier: **PRO+**.
+   * @param address Token address (0x, 40 hex).
+   */
+  risk(address: string): Promise<RhcRiskResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/risk`));
+  }
+
+  /**
+   * Exact holder set and concentration, folded from ERC-20 Transfer logs.
+   *
+   * Not trade-derived — balances come from log replay and are reconciled against
+   * on-chain `totalSupply()` at a pinned block. **Check `verified` first**: false
+   * means the reconstruction is incomplete for that token and the response says
+   * why. Concentration EXCLUDES liquidity pools and burn addresses from the
+   * circulating denominator (the largest holder is otherwise the token's own
+   * pool) and reports them as `pool_held_pct` / `burned_pct`. Balances are raw
+   * uint256 returned as decimal STRINGS to preserve precision.
+   * Tier: **PRO+** (50 rows; ULTRA/BUSINESS raises the cap to 200).
+   * @param address Token address (0x, 40 hex).
+   */
+  holders(address: string, params?: RhcHoldersParams): Promise<RhcHoldersResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/holders`, params as Record<string, string | number | undefined>));
   }
 
   /**

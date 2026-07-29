@@ -7,7 +7,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 25 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, 1-minute OHLC candles, deployer reputation with alerts and trajectories, and smart-money wallet rankings — served from a self-hosted Robinhood Chain node.
+> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 30 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, 1-minute OHLC candles, deployer reputation with alerts and trajectories, and smart-money wallet rankings — served from a self-hosted Robinhood Chain node.
 
 > ⭐ **[Star on GitHub](https://github.com/madeonsol/robinhood-chain-sdk)** · 📂 **[Examples](./examples/)** · 🌐 **[Robinhood Chain](https://madeonsol.com/robinhood)** · 📚 **[API docs](https://madeonsol.com/api-docs)**
 
@@ -46,7 +46,7 @@ const client = new RobinhoodClient({
 
 ## Every endpoint → SDK method
 
-All 25 Robinhood Chain endpoints live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call.
+All 30 Robinhood Chain endpoints live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call.
 
 | # | Endpoint | SDK method | Tier |
 |---|---|---|---|
@@ -198,6 +198,62 @@ for (const t of trades) {
 | `bundle(address)` | `/rhc/tokens/{address}/bundle` | BASIC | Same-block launch-bundle detection + how much of what the cohort bought it still holds. |
 | `batch(addresses)` | `POST /rhc/token/batch` | BASIC | Up to **50** tokens in one call — metadata, price/MC/FDV/liquidity, peak MC, deployer reputation. |
 | `batchBuyerQuality(addresses)` | `POST /rhc/tokens/batch/buyer-quality` | BASIC | Up to **20** tokens' early-buyer quality scores in one call. |
+| `topTraders(address, params?)` | `/rhc/tokens/{address}/top-traders` | PRO+ | Lifetime per-trader performance on one token, ranked by realized ETH, with win-rate / bot / KOL / dump-cluster enrichment. |
+| `flow(address, window?)` | `/rhc/tokens/{address}/flow` | PRO+ | Net buy/sell split by trader cohort — who is accumulating and who is distributing. |
+| `peakHistory(address, params?)` | `/rhc/tokens/{address}/peak-history` | PRO+ | Peak MC, drawdown, and a running high-water curve. Returns both the recorded and the candle-derived observed peak. |
+| `risk(address)` | `/rhc/tokens/{address}/risk` | PRO+ | EVM-native risk computed **live**: proxy upgradeability, mint/pause capability, LP custody, and a live honeypot sell-simulation. |
+| `holders(address, params?)` | `/rhc/tokens/{address}/holders` | PRO+ | Exact holder set + concentration, folded from ERC-20 `Transfer` logs and reconciled against on-chain `totalSupply()`. |
+
+### Who is actually making money — `topTraders(address, params?)` (PRO+)
+
+```ts
+const { traders } = await client.tokens.topTraders("0xdef…", { limit: 25 });
+for (const t of traders) {
+  console.log(t.trader_eoa, t.net_eth, t.win_rate, t.likely_bot ? "(bot)" : "");
+}
+```
+
+> **`net_eth` is REALIZED flow (`sell − buy`), not PnL.** It does not value a trader's remaining bag, so a wallet that bought and still holds ranks **last**, not first. For FIFO cost-basis PnL use `client.wallet.pnl()`.
+
+### Who is buying vs dumping — `flow(address, window?)` (PRO+)
+
+```ts
+const { cohorts } = await client.tokens.flow("0xdef…", "24h");
+// net_eth = sell − buy, so POSITIVE means that cohort DISTRIBUTED.
+const bots = cohorts.find((c) => c.cohort === "bot");
+const smart = cohorts.find((c) => c.cohort === "smart_money");
+```
+
+Cohorts are mutually exclusive, assigned by priority: `kol` → `bot` → `dump_cluster` → `early_buyer` → `unprofiled` → `smart_money` → `retail`. `smart_money` is derived (win-rate ≥ 0.5 and net positive), and `unprofiled` is a real answer — that trader simply has not met the reputation thresholds yet.
+
+### How far off the top — `peakHistory(address, params?)` (PRO+)
+
+```ts
+const p = await client.tokens.peakHistory("0xdef…", { window: "7d" });
+console.log(p.peak.drawdown_from_peak, p.peak.peak_mc_usd_recorded, p.peak.peak_mc_usd_observed);
+```
+
+> **Two peaks are returned because they disagree.** `peak_mc_usd_recorded` is the stored high-water mark that deployer runner-rate and the $40K graduation bar key off; it is sampled from write batches, so it can undercount an intra-batch spike. `peak_mc_usd_observed` is the max of 1-minute candle highs — trade-level truth, and always ≥ recorded. Candle history begins 2026-07-15, so check `observed_covers_full_history` before treating the observed figure as a lifetime maximum.
+
+### Can I actually sell this — `risk(address)` (PRO+)
+
+```ts
+const r = await client.tokens.risk("0xdef…");
+if (r.sellability.sellable === "no") return; // bought-but-cannot-sell
+if (r.flags.includes("upgradeable") || r.capabilities.can_mint) { /* treat with care */ }
+```
+
+> **This is not the Solana risk model.** EVM has no mint or freeze authority: across 300 random Robinhood Chain tokens only **2.3%** even expose an owner function and **0%** expose `mint` in their own bytecode — so an absent flag is the norm, **not** a safety signal. The signals that discriminate here are proxy upgradeability, LP custody and above all **sellability**, which is simulated at the chain head and never cached, because whether a token can be sold changes the instant an owner flips a setting. Note `owner.model: "none"` (no owner function at all) is a different answer from `"renounced"`.
+
+### Who holds it — `holders(address, params?)` (PRO+)
+
+```ts
+const h = await client.tokens.holders("0xdef…", { limit: 50 });
+if (!h.verified) console.warn("unverified:", h.unverified_reason);
+console.log(h.concentration?.top10_share, h.concentration?.pool_held_pct);
+```
+
+> Balances are folded from ERC-20 `Transfer` logs — **not** derived from trades — and reconciled against on-chain `totalSupply()` at a pinned block. **Check `verified` first**: `false` means the reconstruction is incomplete for that token and `unverified_reason` says why. Concentration **excludes liquidity pools and burn addresses** from the circulating denominator (the largest holder of a token is otherwise its own pool) and reports them separately as `pool_held_pct` / `burned_pct`. `balance` is a raw uint256 returned as a decimal **string** — do not `Number()` it. Holder addresses may be ERC-4337 smart accounts, so `holder_count` is not a headcount of people.
 
 ```ts
 // Launch-bundle + quality gate before buying
@@ -397,7 +453,7 @@ try {
 
 ## Types & constants
 
-Fully-typed responses and params for all 25 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
+Fully-typed responses and params for all 30 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
 
 ## Links
 
