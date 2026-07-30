@@ -13,7 +13,7 @@
 
 Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps the MadeOnSol Robinhood Chain API — every field is EVM-native (`token_address` lowercase `0x`, `eth_amount`, `tx_hash`, `block_number`, `net_flow_eth`). It runs in Node.js ≥ 18 and edge runtimes with **zero runtime dependencies** (native `fetch`; the WebSocket stream uses the optional `ws` package on Node < 22 and the platform WebSocket everywhere else).
 
-The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain via `tx.from`. Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
+The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain to the effective trading account (`tx.from`, or the ERC-4337 userOp sender when the trade was bundled). Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
 
 ## Quick start (10 seconds)
 
@@ -84,7 +84,7 @@ All 30 Robinhood Chain endpoints live under `https://madeonsol.com/api/v1`. Bear
 - **Discovery bot** — `client.kol.firstTouches()` gives the globally earliest KOL buy per token, filterable to tokens minutes old.
 - **Launch-bundle / rug gate** — `client.tokens.bundle()` flags a same-block early-buyer bundle and how much of supply it still holds; `client.tokens.buyerQuality()` scores the first-20 cohort 0–100 with a dump-cluster ensemble.
 - **Portfolio / watchlist refresh** — `client.tokens.batch()` prices up to 50 tokens in one call, `client.tokens.batchBuyerQuality()` scores up to 20.
-- **MEV / sandwich analysis** — `client.trades()` gives every Uniswap v2/v3/v4 swap with the real trader EOA (`tx.from`), `gas_price`, `tx_index`, and `method_selector`.
+- **MEV / sandwich analysis** — `client.trades()` gives every Uniswap v2/v3/v4 swap with the effective trading account (`trader_eoa`), `gas_price`, `tx_index`, and `method_selector`.
 - **Deployer due-diligence** — `client.deployerHunter.leaderboard()` / `.profile()` / `.trajectory()` / `.tokens()` rank and profile 40k+ RHC deployers; `.stats()` gives the chain-wide denominator.
 - **Deployer alert feed** — `client.deployerHunter.alerts()` pushes new deploys and graduations, tradability-filtered by default, with the tier resolved at read time.
 - **Smart-money discovery** — `client.alphaWallets()` ranks trader wallets by realized net ETH, win rate, and memecoin share, flagging bot fleets and known KOLs.
@@ -172,7 +172,7 @@ console.log(profile.kol_name, profile.stats.net_eth, "ETH net");
 
 ## DEX trade tape — `client.trades(params?)` — `GET /rhc/trades` (PRO+)
 
-Every Uniswap v2/v3/v4 swap on chain 4663, ~sub-second from execution. Each row carries the authoritative trader wallet (`trader_eoa` = `tx.from`, not the router), gas/ordering for MEV work, pool state, and KOL/deployer flags. Cursor via `next_before`.
+Every Uniswap v2/v3/v4 swap on chain 4663, ~sub-second from execution. Each row carries the effective trading account (`trader_eoa` — `tx.from` normally, or the ERC-4337 userOp sender when the trade was bundled; never the router or the bundler), gas/ordering for MEV work, pool state, and KOL/deployer flags. Cursor via `next_before`.
 
 ```ts
 const { trades } = await client.trades({

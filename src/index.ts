@@ -395,7 +395,12 @@ export interface RhcTrade {
   pool: string;
   /** Swap-log recipient — the ROUTER for aggregated swaps. Use trader_eoa for wallet analytics. */
   trader: string | null;
-  /** Authoritative trader wallet (tx.from). */
+  /**
+   * The effective trading account — tx.from on an ordinary transaction, or the
+   * ERC-4337 userOp sender when the trade was bundled. Never the router or the
+   * bundler. Still an EOA either way (userOp senders here carry an EIP-7702
+   * delegation, not a contract account).
+   */
   trader_eoa: string | null;
   /** Router/aggregator contract (tx.to). */
   router: string | null;
@@ -1583,7 +1588,8 @@ class KolClient {
 
   /**
    * Live feed of KOL trades on Robinhood Chain — every buy/sell from tracked
-   * Solana KOLs' verified EVM wallets, attributed via tx.from. Tier: **BASIC**.
+   * Solana KOLs' verified EVM wallets, attributed to the effective trading
+   * account (tx.from, or the ERC-4337 userOp sender when bundled). Tier: **BASIC**.
    * @param params Optional filters: limit (1–100), before cursor, action, kol wallet (0x), min_eth.
    */
   feed(params?: RhcKolFeedParams): Promise<RhcKolFeedResponse> {
@@ -2046,8 +2052,9 @@ export class RobinhoodClient {
 
   /**
    * Robinhood Chain DEX trade tape — every Uniswap v2/v3/v4 swap on chain 4663,
-   * each row carrying the real trader wallet (tx.from), gas/ordering for MEV
-   * analysis, and KOL/deployer flags. Cursor via `next_before`. Tier: **PRO+**.
+   * each row carrying the effective trading account (tx.from, or the ERC-4337
+   * userOp sender when bundled), gas/ordering for MEV analysis, and
+   * KOL/deployer flags. Cursor via `next_before`. Tier: **PRO+**.
    * @param params Optional: limit, token (0x), dex, action, min_eth, before cursor.
    */
   trades(params?: RhcTradesParams): Promise<RhcTradesResponse> {

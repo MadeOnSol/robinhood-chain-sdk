@@ -9,7 +9,7 @@ Robinhood Chain (RHC) is an Arbitrum Orbit L2, chain id 4663. MadeOnSol (https:/
 - **KOL Trades**: live buy/sell feed from tracked Solana KOLs' verified EVM wallets, a KOL activity leaderboard, consensus "hot tokens" (2+ KOLs), and per-KOL profiles.
 - **KOL Signals**: coordination (tokens N+ distinct KOLs are buying, with the cohort breakdown) and first touches (the earliest KOL entry per token).
 - **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), same-block launch-bundle detection, and batch reads (50 tokens; 20 for buyer-quality).
-- **DEX Trade Tape**: every Uniswap v2/v3/v4 swap with the real trader EOA (tx.from), gas/ordering for MEV analysis, and KOL/deployer flags.
+- **DEX Trade Tape**: every Uniswap v2/v3/v4 swap with the effective trading account (tx.from, or the ERC-4337 userOp sender when bundled), gas/ordering for MEV analysis, and KOL/deployer flags.
 - **Deployer Hunter**: reputation leaderboard, per-deployer profiles, trajectory, launch history, best tokens, chain-wide stats, the alert feed, and recent graduations (graduation = $40K peak MC, runner = $100K; the elite/good tier rides runner_rate + 24h of deployer history).
 - **Alpha Wallets**: smart-money ranking by realized on-chain performance (net ETH, win rate, memecoin share), with bot-fleet flagging.
 - **Streaming**: managed WebSocket for `rhc:kol_trades` and `rhc:trades`.
