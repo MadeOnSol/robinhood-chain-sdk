@@ -1536,6 +1536,430 @@ export interface RhcAlphaWalletsResponse {
   _rid?: string;
 }
 
+// ─── Rule engines: shared ────────────────────────────────────────────────────
+
+/**
+ * Where a fired rule is delivered. `websocket` needs no `webhook_url`; anything
+ * else requires one. A `webhook_secret` is minted (once, on create) only when a
+ * webhook URL is set — payloads are signed HMAC-SHA256 over `<timestamp>.<body>`
+ * in the `X-MadeOnSol-Signature` header.
+ */
+export type DeliveryMode = "webhook" | "websocket" | "both";
+
+/** Every rule-engine DELETE returns this. */
+export interface RhcDeletedResponse {
+  chain: Chain;
+  deleted: boolean;
+  _rid?: string;
+}
+
+// ─── Copy-trade rules (/rhc/copytrade/subscriptions) ─────────────────────────
+
+/** Which side of the tape a copy-trade rule reacts to. */
+export type RhcCopyTradeOnlyAction = "buy" | "sell" | "both";
+
+/** How the suggested size is derived from the source trade. */
+export type RhcCopyTradeSizingMode = "fixed" | "proportional" | "percent_source";
+
+export interface RhcCopyTradeSubscription {
+  /** Numeric identity PK. */
+  id: number;
+  name: string | null;
+  /** Lowercase 0x wallets this rule follows (the API lowercases on write). */
+  source_wallets: string[];
+  /** Minimum source-trade size in ETH for the rule to fire. */
+  min_trade_eth: number;
+  only_action: RhcCopyTradeOnlyAction;
+  sizing_mode: RhcCopyTradeSizingMode;
+  /** ETH when `sizing_mode` is `fixed`, else a multiplier of the source trade. */
+  sizing_amount: number;
+  delivery_mode: DeliveryMode;
+  webhook_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RhcCopyTradeListResponse {
+  chain: Chain;
+  subscriptions: RhcCopyTradeSubscription[];
+  _rid?: string;
+}
+
+export interface RhcCopyTradeCreateParams {
+  name?: string;
+  /** 1–250 EVM addresses (0x, 40 hex); the per-tier cap is enforced server-side. */
+  source_wallets: string[];
+  /** Default 0. */
+  min_trade_eth?: number;
+  /** Default `buy`. */
+  only_action?: RhcCopyTradeOnlyAction;
+  /** Default `fixed`. */
+  sizing_mode?: RhcCopyTradeSizingMode;
+  sizing_amount: number;
+  /** Default `webhook`. */
+  delivery_mode?: DeliveryMode;
+  /** HTTPS only. Required unless `delivery_mode` is `websocket`. */
+  webhook_url?: string;
+}
+
+export interface RhcCopyTradeCreateResponse {
+  chain: Chain;
+  subscription: RhcCopyTradeSubscription;
+  /** Shown ONCE — null when `delivery_mode` is `websocket`. */
+  webhook_secret: string | null;
+  note: string;
+  _rid?: string;
+}
+
+export interface RhcCopyTradeGetResponse {
+  chain: Chain;
+  subscription: RhcCopyTradeSubscription;
+  _rid?: string;
+}
+
+export interface RhcCopyTradeUpdateParams {
+  /** `null` clears the label. */
+  name?: string | null;
+  source_wallets?: string[];
+  min_trade_eth?: number;
+  only_action?: RhcCopyTradeOnlyAction;
+  sizing_mode?: RhcCopyTradeSizingMode;
+  sizing_amount?: number;
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string | null;
+  is_active?: boolean;
+}
+
+// ─── Copy-trade fire history (/rhc/copytrade/signals) ────────────────────────
+
+export interface RhcCopyTradeSignalsParams {
+  /** Scope to one of your rules — 404 if you do not own it. */
+  subscription_id?: number;
+  /** ISO 8601 lower bound on `fired_at`. */
+  since?: string;
+  /** 1–500. Default: 50. */
+  limit?: number;
+}
+
+export interface RhcCopyTradeSignal {
+  id: number;
+  subscription_id: number;
+  fired_at: string;
+  /** The followed wallet whose trade triggered the fire. */
+  source_wallet: string;
+  action: TradeAction;
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  /** Size of the source trade, ETH. */
+  source_eth_amount: number | null;
+  /** Size your rule's `sizing_mode` implies, ETH. */
+  suggested_eth_amount: number | null;
+  price_usd: number | null;
+  dex: string | null;
+  tx_hash: string;
+  delivered: boolean;
+  delivered_at: string | null;
+}
+
+export interface RhcCopyTradeSignalsResponse {
+  chain: Chain;
+  signals: RhcCopyTradeSignal[];
+  count: number;
+  _rid?: string;
+}
+
+// ─── Price alerts (/rhc/price-alerts) ────────────────────────────────────────
+
+/** Lifecycle of an alert. Terminal states are `recovered` and `expired`. */
+export type RhcPriceAlertStatus = "watching" | "dipped" | "recovered" | "expired";
+
+export interface RhcPriceAlert {
+  id: number;
+  name: string | null;
+  token_address: string;
+  token_symbol: string | null;
+  /** MC captured at creation — an alert is a delta from the moment you set it. */
+  baseline_mc_usd: number;
+  drop_pct: number;
+  /** Null for a dip-only, terminal alert. */
+  recovery_pct: number | null;
+  status: RhcPriceAlertStatus;
+  /** Lowest MC seen since the dip fired. */
+  dip_low_mc_usd: number | null;
+  dip_fired_at: string | null;
+  delivery_mode: DeliveryMode;
+  webhook_url: string | null;
+  is_active: boolean;
+  /** Alerts self-expire 30 days after creation. */
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RhcPriceAlertListResponse {
+  chain: Chain;
+  alerts: RhcPriceAlert[];
+  _rid?: string;
+}
+
+export interface RhcPriceAlertCreateParams {
+  name?: string;
+  /** Must already be tracked on RHC with a market cap, else 400. */
+  token_address: string;
+  /** 0.01–99.99. */
+  drop_pct: number;
+  /** 0.01–1000. Omit for a dip-only, terminal alert. */
+  recovery_pct?: number;
+  /** Default `webhook`. */
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string;
+}
+
+/**
+ * How RHC alerts are evaluated. **Not parity with Solana**: these are polled off
+ * `rhc_token_prices` rather than reacting to a live price loop, because the RHC
+ * price writer emits no `pg_notify`. Effective latency is the poll interval plus
+ * the token's own price-update cadence.
+ */
+export interface RhcPriceAlertEvaluation {
+  mode: "polled";
+  interval_seconds: number;
+  note: string;
+}
+
+export interface RhcPriceAlertCreateResponse {
+  chain: Chain;
+  alert: RhcPriceAlert;
+  /** Shown ONCE — null when `delivery_mode` is `websocket`. */
+  webhook_secret: string | null;
+  evaluation: RhcPriceAlertEvaluation;
+  note: string;
+  _rid?: string;
+}
+
+export interface RhcPriceAlertGetResponse {
+  chain: Chain;
+  alert: RhcPriceAlert;
+  _rid?: string;
+}
+
+/**
+ * `token_address`, `drop_pct` and `recovery_pct` are immutable — retuning a
+ * threshold mid-flight would make the alert's recorded events uninterpretable.
+ * Delete and recreate instead.
+ */
+export interface RhcPriceAlertUpdateParams {
+  name?: string | null;
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string | null;
+  is_active?: boolean;
+}
+
+// ─── Price-alert events (/rhc/price-alerts/events) ───────────────────────────
+
+export type RhcPriceAlertEventType = "dip" | "recovery";
+
+export interface RhcPriceAlertEventsParams {
+  /** Scope to one of your alerts — 404 if you do not own it. */
+  alert_id?: number;
+  event_type?: RhcPriceAlertEventType;
+  /** ISO 8601 lower bound on `fired_at`. */
+  since?: string;
+  /** 1–500. Default: 50. */
+  limit?: number;
+}
+
+export interface RhcPriceAlertEvent {
+  id: number;
+  alert_id: number;
+  event_type: RhcPriceAlertEventType;
+  fired_at: string;
+  token_address: string;
+  baseline_mc_usd: number;
+  current_mc_usd: number;
+  /** Measured drop at fire time, percent. */
+  drop_pct_actual: number | null;
+  dip_low_mc_usd: number | null;
+  /** Measured bounce off the dip low, percent — recovery events only. */
+  recovery_pct_actual: number | null;
+  delivered: boolean;
+  delivered_at: string | null;
+}
+
+export interface RhcPriceAlertEventsResponse {
+  chain: Chain;
+  events: RhcPriceAlertEvent[];
+  count: number;
+  _rid?: string;
+}
+
+// ─── KOL coordination rules (/rhc/kol/coordination/alerts) ───────────────────
+
+export interface RhcCoordinationAlertRule {
+  /** UUID. */
+  id: string;
+  name: string | null;
+  /** Distinct tracked KOL buyers needed to fire (2–50). */
+  min_kols: number;
+  /** Rolling window those buys must land inside (1–60 minutes). */
+  window_minutes: number;
+  min_score: number;
+  /** Minutes before the same token can fire again (1–1440). */
+  cooldown_min: number;
+  /** Score jump that breaks the cooldown early (0–100). */
+  score_jump_break: number;
+  min_mc_usd: number | null;
+  max_mc_usd: number | null;
+  delivery_mode: DeliveryMode;
+  webhook_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RhcCoordinationAlertListResponse {
+  chain: Chain;
+  rules: RhcCoordinationAlertRule[];
+  _rid?: string;
+}
+
+export interface RhcCoordinationAlertCreateParams {
+  name?: string;
+  /** 2–50. Default: 3. */
+  min_kols?: number;
+  /** 1–60. Default: 15. */
+  window_minutes?: number;
+  /** 0–100. Default: 0. */
+  min_score?: number;
+  /** 1–1440. Default: 30. */
+  cooldown_min?: number;
+  /** 0–100. Default: 20. */
+  score_jump_break?: number;
+  min_mc_usd?: number | null;
+  max_mc_usd?: number | null;
+  /** Default `websocket`. */
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string;
+}
+
+/**
+ * Which scorer components are real on RHC. Scores are comparable to the Solana
+ * coordination scorer, but `earliness` is defaulted (RHC has no early-entry
+ * equivalent) while `quality` is a real KOL win-rate. Each fired signal records
+ * the same breakdown in its `score_inputs`.
+ */
+export interface RhcCoordinationAlertScoring {
+  score_version: string;
+  quality: string;
+  earliness: string;
+  note: string;
+}
+
+export interface RhcCoordinationAlertCreateResponse {
+  chain: Chain;
+  rule: RhcCoordinationAlertRule;
+  /** Shown ONCE — null when `delivery_mode` is `websocket`. */
+  webhook_secret: string | null;
+  scoring: RhcCoordinationAlertScoring;
+  note: string;
+  _rid?: string;
+}
+
+export interface RhcCoordinationAlertGetResponse {
+  chain: Chain;
+  rule: RhcCoordinationAlertRule;
+  _rid?: string;
+}
+
+export interface RhcCoordinationAlertUpdateParams {
+  name?: string | null;
+  min_kols?: number;
+  window_minutes?: number;
+  min_score?: number;
+  cooldown_min?: number;
+  score_jump_break?: number;
+  min_mc_usd?: number | null;
+  max_mc_usd?: number | null;
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string | null;
+  is_active?: boolean;
+}
+
+// ─── First-touch subscriptions (/rhc/kol/first-touches/subscriptions) ────────
+
+/** Auto-classified trader style of the first-touching KOL. */
+export type RhcFirstTouchStrategy = "scalper" | "day_trader" | "swing" | "inactive" | "unscored";
+
+/**
+ * Push filters. Deliberately NOT the Solana set: RHC has no scout score, so
+ * `min_scout_tier` / `min_n_touches` are absent rather than silently matching
+ * nothing. Unknown keys are rejected with a 400.
+ */
+export interface RhcFirstTouchFilters {
+  /** Only this KOL's first touches (0x, 40 hex). */
+  kol?: string;
+  /** Minimum first-buy size in ETH (0–100000). */
+  min_first_buy_eth?: number;
+  /** 0–1. Win-rate on CLOSED positions; a KOL who has never sold is dropped, not counted as a loser. */
+  min_kol_winrate?: number;
+  strategy?: RhcFirstTouchStrategy;
+  min_mc_usd?: number;
+  max_mc_usd?: number;
+}
+
+export interface RhcFirstTouchSubscription {
+  /** UUID. */
+  id: string;
+  name: string | null;
+  filters: RhcFirstTouchFilters;
+  delivery_mode: DeliveryMode;
+  webhook_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RhcFirstTouchSubscriptionListResponse {
+  chain: Chain;
+  subscriptions: RhcFirstTouchSubscription[];
+  _rid?: string;
+}
+
+export interface RhcFirstTouchSubscriptionCreateParams {
+  name?: string;
+  /** Default `{}` — every first touch. */
+  filters?: RhcFirstTouchFilters;
+  /** Default `websocket`. */
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string;
+}
+
+export interface RhcFirstTouchSubscriptionCreateResponse {
+  chain: Chain;
+  subscription: RhcFirstTouchSubscription;
+  /** Shown ONCE — null when `delivery_mode` is `websocket`. */
+  webhook_secret: string | null;
+  note: string;
+  _rid?: string;
+}
+
+export interface RhcFirstTouchSubscriptionGetResponse {
+  chain: Chain;
+  subscription: RhcFirstTouchSubscription;
+  _rid?: string;
+}
+
+export interface RhcFirstTouchSubscriptionUpdateParams {
+  name?: string | null;
+  /** Whole-object REPLACE, not a merge — merging would make removing a filter inexpressible. */
+  filters?: RhcFirstTouchFilters;
+  delivery_mode?: DeliveryMode;
+  webhook_url?: string | null;
+  is_active?: boolean;
+}
+
 // ─── Stream token (POST /stream/token) ───────────────────────────────────────
 
 export interface StreamToken {
@@ -1581,10 +2005,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Bound GET transport handed to each namespace. */
+type Fetcher = <T>(url: string) => Promise<T>;
+/** Bound body-capable transport (POST/PATCH/DELETE). DELETE sends no body. */
+type Sender = <T>(method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) => Promise<T>;
+
 // ─── KOL namespace (client.kol) ──────────────────────────────────────────────
 
 class KolClient {
-  constructor(private readonly _fetch: <T>(url: string) => Promise<T>, private readonly _baseUrl: string) {}
+  /**
+   * Coordination alert RULES — the push form of `coordination()`. Fires when N+
+   * tracked KOLs buy the same token inside a rolling window. PRO+.
+   */
+  readonly coordinationAlerts: CoordinationAlertsClient;
+  /**
+   * First-touch SUBSCRIPTIONS — the push form of `firstTouches()`. Fires when a
+   * token gets its first tracked-KOL buy. ULTRA+.
+   */
+  readonly firstTouchSubscriptions: FirstTouchSubscriptionsClient;
+
+  constructor(
+    private readonly _fetch: Fetcher,
+    private readonly _baseUrl: string,
+    send: Sender,
+  ) {
+    this.coordinationAlerts = new CoordinationAlertsClient(_fetch, _baseUrl, send);
+    this.firstTouchSubscriptions = new FirstTouchSubscriptionsClient(_fetch, _baseUrl, send);
+  }
 
   /**
    * Live feed of KOL trades on Robinhood Chain — every buy/sell from tracked
@@ -1959,6 +2406,283 @@ class DeployerHunterClient {
   }
 }
 
+// ─── Copy-trade rules namespace (client.copyTrade) ───────────────────────────
+
+/**
+ * Server-side copy-trade rules: MadeOnSol watches the Robinhood Chain tape and
+ * pushes you a signal when a wallet you follow trades — webhook, WebSocket, or
+ * both. **Quotas are per chain**: RHC rules never consume your Solana budget.
+ * Tier: **PRO+**.
+ */
+class CopyTradeClient {
+  constructor(
+    private readonly _fetch: Fetcher,
+    private readonly _baseUrl: string,
+    private readonly _send: Sender,
+  ) {}
+
+  /**
+   * Your Robinhood Chain copy-trade rules. Tier: **PRO+**.
+   * `GET /rhc/copytrade/subscriptions`
+   */
+  list(): Promise<RhcCopyTradeListResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/copytrade/subscriptions"));
+  }
+
+  /**
+   * Create a copy-trade rule — fires when one of `source_wallets` trades on RHC.
+   *
+   * Sizes are **ETH, not SOL**, and there is deliberately **no market-cap band**:
+   * the RHC trade event carries no market cap, so a band could only be a
+   * per-event DB lookup in the hot path of a ~3.3M-trades/day chain. The response
+   * carries `webhook_secret` **once** — store it, it is never shown again.
+   * Tier: **PRO+**. `POST /rhc/copytrade/subscriptions`
+   */
+  create(params: RhcCopyTradeCreateParams): Promise<RhcCopyTradeCreateResponse> {
+    return this._send("POST", buildUrl(this._baseUrl, "/rhc/copytrade/subscriptions"), params);
+  }
+
+  /**
+   * Fetch one copy-trade rule. Tier: **PRO+**.
+   * `GET /rhc/copytrade/subscriptions/{id}`
+   * @param id Numeric rule id.
+   */
+  get(id: number): Promise<RhcCopyTradeGetResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/copytrade/subscriptions/${id}`));
+  }
+
+  /**
+   * Partially update a copy-trade rule. The per-tier wallet cap is re-checked, so
+   * a PRO rule cannot be PATCHed past its limit. Tier: **PRO+**.
+   * `PATCH /rhc/copytrade/subscriptions/{id}`
+   * @param id Numeric rule id.
+   */
+  update(id: number, params: RhcCopyTradeUpdateParams): Promise<RhcCopyTradeGetResponse> {
+    return this._send("PATCH", buildUrl(this._baseUrl, `/rhc/copytrade/subscriptions/${id}`), params);
+  }
+
+  /**
+   * Delete a copy-trade rule (its fired signals cascade). Tier: **PRO+**.
+   * `DELETE /rhc/copytrade/subscriptions/{id}`
+   * @param id Numeric rule id.
+   */
+  delete(id: number): Promise<RhcDeletedResponse> {
+    return this._send("DELETE", buildUrl(this._baseUrl, `/rhc/copytrade/subscriptions/${id}`));
+  }
+
+  /**
+   * Fire history for your copy-trade rules — the catch-up path when a webhook was
+   * missed or the WS channel dropped. Retained 7 days. Tier: **PRO+**.
+   * `GET /rhc/copytrade/signals`
+   * @param params Optional: subscription_id, since (ISO 8601), limit (1–500).
+   */
+  signals(params?: RhcCopyTradeSignalsParams): Promise<RhcCopyTradeSignalsResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/copytrade/signals", params as Record<string, string | number | undefined>));
+  }
+}
+
+// ─── Price alerts namespace (client.priceAlerts) ─────────────────────────────
+
+/**
+ * Market-cap dip/recovery alerts on Robinhood Chain tokens. Quota is per chain.
+ *
+ * **RHC alerts are polled (~15s), not sub-second like the Solana ones.**
+ * `rhc_token_prices` is written by the RHC ingester on a separate box and emits
+ * no `pg_notify`, so there is nothing to react to — effective latency is the
+ * poll interval plus the token's own price-update cadence. Every create response
+ * spells this out in its `evaluation` block. Tier: **PRO+**.
+ */
+class PriceAlertsClient {
+  constructor(
+    private readonly _fetch: Fetcher,
+    private readonly _baseUrl: string,
+    private readonly _send: Sender,
+  ) {}
+
+  /**
+   * Your Robinhood Chain price alerts. Tier: **PRO+**. `GET /rhc/price-alerts`
+   */
+  list(): Promise<RhcPriceAlertListResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/price-alerts"));
+  }
+
+  /**
+   * Create a price alert. The baseline MC is captured **now**, so the alert is a
+   * delta from the moment you set it, and the token must already be tracked with
+   * a market cap (else 400). Alerts self-expire after 30 days.
+   * Tier: **PRO+**. `POST /rhc/price-alerts`
+   */
+  create(params: RhcPriceAlertCreateParams): Promise<RhcPriceAlertCreateResponse> {
+    return this._send("POST", buildUrl(this._baseUrl, "/rhc/price-alerts"), params);
+  }
+
+  /**
+   * Fetch one price alert. Tier: **PRO+**. `GET /rhc/price-alerts/{id}`
+   * @param id Numeric alert id.
+   */
+  get(id: number): Promise<RhcPriceAlertGetResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/price-alerts/${id}`));
+  }
+
+  /**
+   * Update a price alert. Only `name`, `delivery_mode`, `webhook_url` and
+   * `is_active` are mutable — retuning a threshold mid-flight would make the
+   * alert's recorded events uninterpretable, so delete and recreate instead.
+   * Tier: **PRO+**. `PATCH /rhc/price-alerts/{id}`
+   * @param id Numeric alert id.
+   */
+  update(id: number, params: RhcPriceAlertUpdateParams): Promise<RhcPriceAlertGetResponse> {
+    return this._send("PATCH", buildUrl(this._baseUrl, `/rhc/price-alerts/${id}`), params);
+  }
+
+  /**
+   * Delete a price alert (its events cascade). Tier: **PRO+**.
+   * `DELETE /rhc/price-alerts/{id}`
+   * @param id Numeric alert id.
+   */
+  delete(id: number): Promise<RhcDeletedResponse> {
+    return this._send("DELETE", buildUrl(this._baseUrl, `/rhc/price-alerts/${id}`));
+  }
+
+  /**
+   * Dip and recovery events for your price alerts — the catch-up path for a
+   * missed webhook or a dropped WS channel. Retained 30 days. Tier: **PRO+**.
+   * `GET /rhc/price-alerts/events`
+   * @param params Optional: alert_id, event_type (dip | recovery), since, limit (1–500).
+   */
+  events(params?: RhcPriceAlertEventsParams): Promise<RhcPriceAlertEventsResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/price-alerts/events", params as Record<string, string | number | undefined>));
+  }
+}
+
+// ─── Coordination alert rules namespace (client.kol.coordinationAlerts) ──────
+
+/**
+ * Push rules over KOL coordination — fire when N+ distinct tracked KOLs buy the
+ * same token inside a rolling window. The polling read is
+ * `client.kol.coordination()`. Quota is per chain. Tier: **PRO+**.
+ */
+class CoordinationAlertsClient {
+  constructor(
+    private readonly _fetch: Fetcher,
+    private readonly _baseUrl: string,
+    private readonly _send: Sender,
+  ) {}
+
+  /**
+   * Your RHC coordination rules. Tier: **PRO+**.
+   * `GET /rhc/kol/coordination/alerts`
+   */
+  list(): Promise<RhcCoordinationAlertListResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/kol/coordination/alerts"));
+  }
+
+  /**
+   * Create a coordination rule.
+   *
+   * Scoring is the shared v1 scorer, so the number is comparable to Solana, but
+   * `earliness` is **defaulted** on RHC (there is no early-entry equivalent)
+   * while `quality` is a real KOL win-rate — the response's `scoring` block
+   * records which components are real, and every fired signal repeats it in
+   * `score_inputs`. Tier: **PRO+**. `POST /rhc/kol/coordination/alerts`
+   */
+  create(params: RhcCoordinationAlertCreateParams): Promise<RhcCoordinationAlertCreateResponse> {
+    return this._send("POST", buildUrl(this._baseUrl, "/rhc/kol/coordination/alerts"), params);
+  }
+
+  /**
+   * Fetch one coordination rule. Tier: **PRO+**.
+   * `GET /rhc/kol/coordination/alerts/{id}`
+   * @param id Rule UUID.
+   */
+  get(id: string): Promise<RhcCoordinationAlertGetResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/kol/coordination/alerts/${encodeURIComponent(id)}`));
+  }
+
+  /**
+   * Partially update a coordination rule. Tier: **PRO+**.
+   * `PATCH /rhc/kol/coordination/alerts/{id}`
+   * @param id Rule UUID.
+   */
+  update(id: string, params: RhcCoordinationAlertUpdateParams): Promise<RhcCoordinationAlertGetResponse> {
+    return this._send("PATCH", buildUrl(this._baseUrl, `/rhc/kol/coordination/alerts/${encodeURIComponent(id)}`), params);
+  }
+
+  /**
+   * Delete a coordination rule (its cooldown state and fired signals cascade).
+   * Tier: **PRO+**. `DELETE /rhc/kol/coordination/alerts/{id}`
+   * @param id Rule UUID.
+   */
+  delete(id: string): Promise<RhcDeletedResponse> {
+    return this._send("DELETE", buildUrl(this._baseUrl, `/rhc/kol/coordination/alerts/${encodeURIComponent(id)}`));
+  }
+}
+
+// ─── First-touch subscriptions namespace (client.kol.firstTouchSubscriptions) ─
+
+/**
+ * Push subscriptions over KOL first touches — fire when a token gets its FIRST
+ * buy from any tracked KOL. The polling read is `client.kol.firstTouches()`.
+ * Quota is per chain. Tier: **ULTRA+**.
+ */
+class FirstTouchSubscriptionsClient {
+  constructor(
+    private readonly _fetch: Fetcher,
+    private readonly _baseUrl: string,
+    private readonly _send: Sender,
+  ) {}
+
+  /**
+   * Your RHC first-touch subscriptions. Tier: **ULTRA+**.
+   * `GET /rhc/kol/first-touches/subscriptions`
+   */
+  list(): Promise<RhcFirstTouchSubscriptionListResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/kol/first-touches/subscriptions"));
+  }
+
+  /**
+   * Create a first-touch subscription.
+   *
+   * The filter set is deliberately **not** the Solana one: RHC has no scout
+   * score, so `min_scout_tier` / `min_n_touches` are absent rather than silently
+   * matching nothing — `min_kol_winrate` (win-rate on CLOSED positions) and
+   * `strategy` are the quality gates. Unknown filter keys are **rejected with a
+   * 400**, not ignored. Tier: **ULTRA+**.
+   * `POST /rhc/kol/first-touches/subscriptions`
+   */
+  create(params: RhcFirstTouchSubscriptionCreateParams): Promise<RhcFirstTouchSubscriptionCreateResponse> {
+    return this._send("POST", buildUrl(this._baseUrl, "/rhc/kol/first-touches/subscriptions"), params);
+  }
+
+  /**
+   * Fetch one first-touch subscription. Tier: **ULTRA+**.
+   * `GET /rhc/kol/first-touches/subscriptions/{id}`
+   * @param id Subscription UUID.
+   */
+  get(id: string): Promise<RhcFirstTouchSubscriptionGetResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/kol/first-touches/subscriptions/${encodeURIComponent(id)}`));
+  }
+
+  /**
+   * Update a first-touch subscription. `filters` is a whole-object **replace**,
+   * not a merge — merging would make "remove this filter" inexpressible.
+   * Tier: **ULTRA+**. `PATCH /rhc/kol/first-touches/subscriptions/{id}`
+   * @param id Subscription UUID.
+   */
+  update(id: string, params: RhcFirstTouchSubscriptionUpdateParams): Promise<RhcFirstTouchSubscriptionGetResponse> {
+    return this._send("PATCH", buildUrl(this._baseUrl, `/rhc/kol/first-touches/subscriptions/${encodeURIComponent(id)}`), params);
+  }
+
+  /**
+   * Delete a first-touch subscription. Tier: **ULTRA+**.
+   * `DELETE /rhc/kol/first-touches/subscriptions/{id}`
+   * @param id Subscription UUID.
+   */
+  delete(id: string): Promise<RhcDeletedResponse> {
+    return this._send("DELETE", buildUrl(this._baseUrl, `/rhc/kol/first-touches/subscriptions/${encodeURIComponent(id)}`));
+  }
+}
+
 // ─── Stream namespace (client.stream) ────────────────────────────────────────
 
 class StreamClient {
@@ -1995,11 +2719,15 @@ class StreamClient {
 /**
  * Robinhood Chain API client (chain id 4663).
  *
- * All 25 Robinhood Chain endpoints: EVM-native on-chain trading intelligence —
+ * All 52 Robinhood Chain endpoints: EVM-native on-chain trading intelligence —
  * live KOL trades and coordination, token discovery & bundles, the DEX trade
- * tape, OHLC candles, deployer reputation, and smart-money wallets.
+ * tape, OHLC candles, deployer reputation, smart-money wallets, and the four
+ * push rule engines (copy-trade, price alerts, KOL coordination, first touches).
  * Authenticate with a MadeOnSol `msk_` key (same key, same base URL as the
  * Solana API — Robinhood Chain is bundled into every tier).
+ *
+ * Rule-engine quotas are **per chain** — RHC rules never consume your Solana
+ * allowance.
  *
  * @example
  * ```ts
@@ -2010,6 +2738,14 @@ class StreamClient {
  * const { trades } = await client.kol.feed({ limit: 10, action: "buy" });
  * const { tokens } = await client.kol.hotTokens({ window: "1h" });
  * const bundle = await client.tokens.bundle("0x1234…");
+ *
+ * // Push instead of poll: follow three wallets, 0.05 ETH per copy.
+ * const { subscription } = await client.copyTrade.create({
+ *   source_wallets: ["0xaaa…", "0xbbb…", "0xccc…"],
+ *   sizing_mode: "fixed",
+ *   sizing_amount: 0.05,
+ *   delivery_mode: "websocket",
+ * });
  * ```
  */
 export class RobinhoodClient {
@@ -2019,6 +2755,10 @@ export class RobinhoodClient {
   readonly tokens: TokensClient;
   /** Deployer reputation — leaderboard, profile, trajectory, launch history, best tokens, chain stats, alerts, recent graduations. */
   readonly deployerHunter: DeployerHunterClient;
+  /** Copy-trade rule engine — follow wallets, get pushed a signal when they trade (PRO+). Quota is per chain. */
+  readonly copyTrade: CopyTradeClient;
+  /** Price-alert rule engine — MC dip/recovery alerts, polled ~15s (PRO+). Quota is per chain. */
+  readonly priceAlerts: PriceAlertsClient;
   /** Managed WebSocket streaming (rhc:kol_trades, rhc:trades) — PRO+. */
   readonly stream: StreamClient;
 
@@ -2043,10 +2783,14 @@ export class RobinhoodClient {
 
     const boundGet = this._request.bind(this);
     const boundPost = ((url: string, body?: unknown) => this._requestWithBody("POST", url, body)) as <T>(url: string, body?: unknown) => Promise<T>;
+    const boundSend = ((method: "POST" | "PATCH" | "DELETE", url: string, body?: unknown) =>
+      this._requestWithBody(method, url, body)) as Sender;
 
-    this.kol = new KolClient(boundGet, this._baseUrl);
+    this.kol = new KolClient(boundGet, this._baseUrl, boundSend);
     this.tokens = new TokensClient(boundGet, this._baseUrl, boundPost);
     this.deployerHunter = new DeployerHunterClient(boundGet, this._baseUrl);
+    this.copyTrade = new CopyTradeClient(boundGet, this._baseUrl, boundSend);
+    this.priceAlerts = new PriceAlertsClient(boundGet, this._baseUrl, boundSend);
     this.stream = new StreamClient(boundPost, this._baseUrl);
   }
 

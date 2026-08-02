@@ -1,7 +1,7 @@
 {
   "name": "robinhood-chain-sdk",
-  "version": "0.3.1",
-  "description": "Official TypeScript SDK for the Robinhood Chain (chain id 4663) API — EVM-native on-chain trading intelligence: live KOL trades, token discovery & bundles, the DEX trade tape, OHLC candles, deployer reputation, and smart-money wallets. Zero dependencies.",
+  "version": "0.4.0",
+  "description": "Official TypeScript SDK for the Robinhood Chain (chain id 4663) API — EVM-native on-chain trading intelligence: live KOL trades, token discovery & bundles, the DEX trade tape, OHLC candles, deployer reputation, smart-money wallets, and push rule engines (copy-trade, price alerts, KOL coordination, first touches). Zero dependencies.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

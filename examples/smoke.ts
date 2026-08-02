@@ -1,5 +1,5 @@
 /**
- * Type-check smoke test — references every one of the 25 endpoints and the
+ * Type-check smoke test — references every one of the 52 endpoints and the
  * stream client so `npm test` fails if a method signature or type drifts.
  *
  * This does NOT make network calls; it only exercises the type surface. To run
@@ -23,6 +23,11 @@ import {
   type RhcKolConsensusResponse,
   type RhcBuyerQualityResponse,
   type RhcBundleResponse,
+  type RhcTopTradersResponse,
+  type RhcFlowResponse,
+  type RhcPeakHistoryResponse,
+  type RhcRiskResponse,
+  type RhcHoldersResponse,
   type RhcTokenBatchResponse,
   type RhcBatchBuyerQualityResponse,
   type RhcDeployerLeaderboardResponse,
@@ -35,6 +40,21 @@ import {
   type RhcDeployerAlertsResponse,
   type RhcRecentBondsResponse,
   type RhcAlphaWalletsResponse,
+  type RhcCopyTradeListResponse,
+  type RhcCopyTradeCreateResponse,
+  type RhcCopyTradeGetResponse,
+  type RhcCopyTradeSignalsResponse,
+  type RhcPriceAlertListResponse,
+  type RhcPriceAlertCreateResponse,
+  type RhcPriceAlertGetResponse,
+  type RhcPriceAlertEventsResponse,
+  type RhcCoordinationAlertListResponse,
+  type RhcCoordinationAlertCreateResponse,
+  type RhcCoordinationAlertGetResponse,
+  type RhcFirstTouchSubscriptionListResponse,
+  type RhcFirstTouchSubscriptionCreateResponse,
+  type RhcFirstTouchSubscriptionGetResponse,
+  type RhcDeletedResponse,
 } from "robinhood-chain-sdk";
 
 const RUN = false;
@@ -42,6 +62,7 @@ const client = new RobinhoodClient({ apiKey: process.env.MADEONSOL_API_KEY ?? "m
 
 const wallet = "0x1111111111111111111111111111111111111111";
 const token = "0x2222222222222222222222222222222222222222";
+const uuid = "00000000-0000-0000-0000-000000000000";
 
 async function main(): Promise<void> {
   // 1–6: KOL
@@ -55,17 +76,22 @@ async function main(): Promise<void> {
   // 7: DEX tape
   const tape: RhcTradesResponse = await client.trades({ dex: "uniswap-v3", limit: 25 });
 
-  // 8–15: tokens
+  // 8–20: tokens
   const list: RhcTokensListResponse = await client.tokens.list({ sort: "market_cap", min_mc_usd: 1000 });
   const snap: RhcTokenSnapshot = await client.tokens.get(token);
   const candles: RhcCandlesResponse = await client.tokens.candles(token, { limit: 240 });
   const consensus: RhcKolConsensusResponse = await client.tokens.kolConsensus(token);
   const quality: RhcBuyerQualityResponse = await client.tokens.buyerQuality(token);
   const bundle: RhcBundleResponse = await client.tokens.bundle(token);
+  const traders: RhcTopTradersResponse = await client.tokens.topTraders(token, { limit: 50 });
+  const flow: RhcFlowResponse = await client.tokens.flow(token, "24h");
+  const peak: RhcPeakHistoryResponse = await client.tokens.peakHistory(token, { window: "7d" });
+  const risk: RhcRiskResponse = await client.tokens.risk(token);
+  const holders: RhcHoldersResponse = await client.tokens.holders(token, { limit: 50 });
   const batch: RhcTokenBatchResponse = await client.tokens.batch([token]);          // max 50
   const batchQ: RhcBatchBuyerQualityResponse = await client.tokens.batchBuyerQuality([token]); // max 20
 
-  // 16–24: deployer hunter
+  // 21–29: deployer hunter
   const dlb: RhcDeployerLeaderboardResponse = await client.deployerHunter.leaderboard({ tier: "elite", sort: "runner_rate" });
   const dprof: RhcDeployerProfileResponse = await client.deployerHunter.profile(wallet);
   const traj: RhcDeployerTrajectoryResponse = await client.deployerHunter.trajectory(wallet);
@@ -76,8 +102,60 @@ async function main(): Promise<void> {
   const alerts: RhcDeployerAlertsResponse = await client.deployerHunter.alerts({ deployer_tier: "good", include_untradeable: false });
   const bonds: RhcRecentBondsResponse = await client.deployerHunter.recentBonds({ min_peak: 100_000 });
 
-  // 25: alpha wallets
+  // 30: alpha wallets
   const alpha: RhcAlphaWalletsResponse = await client.alphaWallets({ classification: "smart_money", sort: "net_eth" });
+
+  // 31–36: copy-trade rule engine (PRO+). Quotas are PER CHAIN.
+  const ctList: RhcCopyTradeListResponse = await client.copyTrade.list();
+  const ctNew: RhcCopyTradeCreateResponse = await client.copyTrade.create({
+    name: "degen desk",
+    source_wallets: [wallet],
+    min_trade_eth: 0.01,
+    only_action: "buy",
+    sizing_mode: "fixed",   // no MC band on RHC — the trade event carries no market cap
+    sizing_amount: 0.05,
+    delivery_mode: "websocket",
+  });
+  const ctOne: RhcCopyTradeGetResponse = await client.copyTrade.get(ctNew.subscription.id);
+  const ctUpd: RhcCopyTradeGetResponse = await client.copyTrade.update(ctNew.subscription.id, { is_active: false });
+  const ctSignals: RhcCopyTradeSignalsResponse = await client.copyTrade.signals({ subscription_id: ctNew.subscription.id, limit: 50 });
+  const ctDel: RhcDeletedResponse = await client.copyTrade.delete(ctNew.subscription.id);
+
+  // 37–42: price alerts (PRO+) — POLLED ~15s on RHC, not sub-second like Solana.
+  const paList: RhcPriceAlertListResponse = await client.priceAlerts.list();
+  const paNew: RhcPriceAlertCreateResponse = await client.priceAlerts.create({
+    token_address: token,
+    drop_pct: 30,
+    recovery_pct: 15,
+    webhook_url: "https://example.com/hook",
+  });
+  const paOne: RhcPriceAlertGetResponse = await client.priceAlerts.get(paNew.alert.id);
+  const paUpd: RhcPriceAlertGetResponse = await client.priceAlerts.update(paNew.alert.id, { name: "watch" });
+  const paEvents: RhcPriceAlertEventsResponse = await client.priceAlerts.events({ alert_id: paNew.alert.id, event_type: "dip" });
+  const paDel: RhcDeletedResponse = await client.priceAlerts.delete(paNew.alert.id);
+
+  // 43–47: KOL coordination rules (PRO+)
+  const caList: RhcCoordinationAlertListResponse = await client.kol.coordinationAlerts.list();
+  const caNew: RhcCoordinationAlertCreateResponse = await client.kol.coordinationAlerts.create({
+    min_kols: 3,
+    window_minutes: 15,
+    cooldown_min: 30,
+    delivery_mode: "websocket",
+  });
+  const caOne: RhcCoordinationAlertGetResponse = await client.kol.coordinationAlerts.get(uuid);
+  const caUpd: RhcCoordinationAlertGetResponse = await client.kol.coordinationAlerts.update(uuid, { min_score: 40 });
+  const caDel: RhcDeletedResponse = await client.kol.coordinationAlerts.delete(uuid);
+
+  // 48–52: KOL first-touch subscriptions (ULTRA+). Unknown filter keys are 400s.
+  const ftList: RhcFirstTouchSubscriptionListResponse = await client.kol.firstTouchSubscriptions.list();
+  const ftNew: RhcFirstTouchSubscriptionCreateResponse = await client.kol.firstTouchSubscriptions.create({
+    name: "early hands",
+    filters: { min_first_buy_eth: 0.05, min_kol_winrate: 0.5, strategy: "swing" },
+    delivery_mode: "websocket",
+  });
+  const ftOne: RhcFirstTouchSubscriptionGetResponse = await client.kol.firstTouchSubscriptions.get(uuid);
+  const ftUpd: RhcFirstTouchSubscriptionGetResponse = await client.kol.firstTouchSubscriptions.update(uuid, { filters: {} });
+  const ftDel: RhcDeletedResponse = await client.kol.firstTouchSubscriptions.delete(uuid);
 
   // Touch a representative EVM-native field on each to lock the types in.
   console.log(
@@ -97,6 +175,11 @@ async function main(): Promise<void> {
     consensus.consensus?.net_flow_eth,
     quality.quality.breakdown.dump_cluster_count,
     bundle.bundle.held_pct_of_supply,
+    traders.traders[0]?.net_eth,
+    flow.cohorts[0]?.net_eth,
+    peak.peak.peak_mc_usd_observed,
+    risk.sellability.sellable,
+    holders.verified,
     batch.found,
     batchQ.max_addresses,
     dlb.deployers[0]?.graduation_rate,
@@ -110,6 +193,29 @@ async function main(): Promise<void> {
     alerts.tradability_filter,
     bonds.graduation_mc,
     alpha.wallets[0]?.memecoin_share,
+    ctList.subscriptions[0]?.source_wallets,
+    ctNew.webhook_secret,
+    ctOne.subscription.sizing_mode,
+    ctUpd.subscription.is_active,
+    ctSignals.signals[0]?.suggested_eth_amount,
+    ctDel.deleted,
+    paList.alerts[0]?.baseline_mc_usd,
+    paNew.evaluation.mode,            // "polled" — RHC alerts are NOT sub-second
+    paNew.evaluation.interval_seconds,
+    paOne.alert.status,
+    paUpd.alert.name,
+    paEvents.events[0]?.drop_pct_actual,
+    paDel.deleted,
+    caList.rules[0]?.min_kols,
+    caNew.scoring.earliness,          // defaulted on RHC — no early-entry equivalent
+    caOne.rule.cooldown_min,
+    caUpd.rule.min_score,
+    caDel.deleted,
+    ftList.subscriptions[0]?.filters.min_kol_winrate,
+    ftNew.subscription.delivery_mode,
+    ftOne.subscription.filters.strategy,
+    ftUpd.subscription.is_active,
+    ftDel.deleted,
   );
 
   // Stream surface.

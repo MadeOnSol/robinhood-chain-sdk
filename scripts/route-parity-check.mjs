@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * route-parity-check.mjs — fails CI if this SDK references an `/rhc/*` API path
- * that is not one of the 25 published Robinhood Chain routes (rename drift).
+ * that is not one of the 40 published Robinhood Chain route patterns (rename
+ * drift). 40 patterns, 52 operations — the rule-engine collection and item paths
+ * each serve several methods (GET/POST, GET/PATCH/DELETE).
  *
  * This standalone repo is NOT scanned by the monorepo's sdk-route-parity guard,
- * so it ships its own. The 25 routes are pinned below (the authoritative RHC
+ * so it ships its own. The 40 patterns are pinned below (the authoritative RHC
  * surface, chain id 4663). Set OPENAPI_URL to instead validate against the live
  * spec's `/rhc/*` paths.
  *
@@ -20,7 +22,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, "..", "src");
 
-// The 25 authoritative Robinhood Chain routes (relative to /api/v1), normalized.
+// The 40 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
 const RHC_ROUTES = [
   "/rhc/kol/feed",
   "/rhc/kol/leaderboard",
@@ -35,6 +37,11 @@ const RHC_ROUTES = [
   "/rhc/tokens/:p/kol-consensus",
   "/rhc/tokens/:p/buyer-quality",
   "/rhc/tokens/:p/bundle",
+  "/rhc/tokens/:p/top-traders",
+  "/rhc/tokens/:p/flow",
+  "/rhc/tokens/:p/peak-history",
+  "/rhc/tokens/:p/risk",
+  "/rhc/tokens/:p/holders",
   "/rhc/token/batch",
   "/rhc/tokens/batch/buyer-quality",
   "/rhc/deployer-hunter/leaderboard",
@@ -47,6 +54,17 @@ const RHC_ROUTES = [
   "/rhc/deployer-hunter/:p/tokens",
   "/rhc/deployer-hunter/:p/history",
   "/rhc/alpha-wallets",
+  // Rule engines — collection + item paths (each serves several HTTP methods).
+  "/rhc/copytrade/subscriptions",
+  "/rhc/copytrade/subscriptions/:p",
+  "/rhc/copytrade/signals",
+  "/rhc/price-alerts",
+  "/rhc/price-alerts/events",
+  "/rhc/price-alerts/:p",
+  "/rhc/kol/coordination/alerts",
+  "/rhc/kol/coordination/alerts/:p",
+  "/rhc/kol/first-touches/subscriptions",
+  "/rhc/kol/first-touches/subscriptions/:p",
 ];
 
 function normalize(p) {

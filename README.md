@@ -7,7 +7,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 30 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, 1-minute OHLC candles, deployer reputation with alerts and trajectories, and smart-money wallet rankings — served from a self-hosted Robinhood Chain node.
+> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 52 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, 1-minute OHLC candles, deployer reputation with alerts and trajectories, smart-money wallet rankings, and four **push rule engines** (copy-trade, price alerts, KOL coordination, first touches) — served from a self-hosted Robinhood Chain node.
 
 > ⭐ **[Star on GitHub](https://github.com/madeonsol/robinhood-chain-sdk)** · 📂 **[Examples](./examples/)** · 🌐 **[Robinhood Chain](https://madeonsol.com/robinhood)** · 📚 **[API docs](https://madeonsol.com/api-docs)**
 
@@ -46,7 +46,7 @@ const client = new RobinhoodClient({
 
 ## Every endpoint → SDK method
 
-All 30 Robinhood Chain endpoints live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call.
+All 52 Robinhood Chain operations live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call. Everything is a `GET` except the two batch reads and the four rule engines at the bottom, which are full CRUD.
 
 | # | Endpoint | SDK method | Tier |
 |---|---|---|---|
@@ -63,23 +63,51 @@ All 30 Robinhood Chain endpoints live under `https://madeonsol.com/api/v1`. Bear
 | 11 | `GET /rhc/tokens/{address}/kol-consensus` | `client.tokens.kolConsensus(address)` | PRO+ |
 | 12 | `GET /rhc/tokens/{address}/buyer-quality` | `client.tokens.buyerQuality(address)` | BASIC |
 | 13 | `GET /rhc/tokens/{address}/bundle` | `client.tokens.bundle(address)` | BASIC |
-| 14 | `POST /rhc/token/batch` | `client.tokens.batch(addresses)` — max 50 | BASIC |
-| 15 | `POST /rhc/tokens/batch/buyer-quality` | `client.tokens.batchBuyerQuality(addresses)` — **max 20** | BASIC |
-| 16 | `GET /rhc/deployer-hunter/leaderboard` | `client.deployerHunter.leaderboard(params?)` | BASIC |
-| 17 | `GET /rhc/deployer-hunter/best-tokens` | `client.deployerHunter.bestTokens(params?)` | BASIC |
-| 18 | `GET /rhc/deployer-hunter/stats` | `client.deployerHunter.stats()` | BASIC |
-| 19 | `GET /rhc/deployer-hunter/alerts` | `client.deployerHunter.alerts(params?)` | BASIC |
-| 20 | `GET /rhc/deployer-hunter/recent-bonds` | `client.deployerHunter.recentBonds(params?)` | BASIC |
-| 21 | `GET /rhc/deployer-hunter/{address}` | `client.deployerHunter.profile(address)` | BASIC |
-| 22 | `GET /rhc/deployer-hunter/{address}/trajectory` | `client.deployerHunter.trajectory(address)` | BASIC |
-| 23 | `GET /rhc/deployer-hunter/{address}/tokens` | `client.deployerHunter.tokens(address, params?)` | BASIC |
-| 24 | `GET /rhc/deployer-hunter/{address}/history` | `client.deployerHunter.history(address, params?)` | PRO+ |
-| 25 | `GET /rhc/alpha-wallets` | `client.alphaWallets(params?)` | PRO+ |
+| 14 | `GET /rhc/tokens/{address}/top-traders` | `client.tokens.topTraders(address, params?)` | PRO+ |
+| 15 | `GET /rhc/tokens/{address}/flow` | `client.tokens.flow(address, window?)` | PRO+ |
+| 16 | `GET /rhc/tokens/{address}/peak-history` | `client.tokens.peakHistory(address, params?)` | PRO+ |
+| 17 | `GET /rhc/tokens/{address}/risk` | `client.tokens.risk(address)` | PRO+ |
+| 18 | `GET /rhc/tokens/{address}/holders` | `client.tokens.holders(address, params?)` | PRO+ |
+| 19 | `POST /rhc/token/batch` | `client.tokens.batch(addresses)` — max 50 | BASIC |
+| 20 | `POST /rhc/tokens/batch/buyer-quality` | `client.tokens.batchBuyerQuality(addresses)` — **max 20** | BASIC |
+| 21 | `GET /rhc/deployer-hunter/leaderboard` | `client.deployerHunter.leaderboard(params?)` | BASIC |
+| 22 | `GET /rhc/deployer-hunter/best-tokens` | `client.deployerHunter.bestTokens(params?)` | BASIC |
+| 23 | `GET /rhc/deployer-hunter/stats` | `client.deployerHunter.stats()` | BASIC |
+| 24 | `GET /rhc/deployer-hunter/alerts` | `client.deployerHunter.alerts(params?)` | BASIC |
+| 25 | `GET /rhc/deployer-hunter/recent-bonds` | `client.deployerHunter.recentBonds(params?)` | BASIC |
+| 26 | `GET /rhc/deployer-hunter/{address}` | `client.deployerHunter.profile(address)` | BASIC |
+| 27 | `GET /rhc/deployer-hunter/{address}/trajectory` | `client.deployerHunter.trajectory(address)` | BASIC |
+| 28 | `GET /rhc/deployer-hunter/{address}/tokens` | `client.deployerHunter.tokens(address, params?)` | BASIC |
+| 29 | `GET /rhc/deployer-hunter/{address}/history` | `client.deployerHunter.history(address, params?)` | PRO+ |
+| 30 | `GET /rhc/alpha-wallets` | `client.alphaWallets(params?)` | PRO+ |
+| 31 | `GET /rhc/copytrade/subscriptions` | `client.copyTrade.list()` | PRO+ |
+| 32 | `POST /rhc/copytrade/subscriptions` | `client.copyTrade.create(params)` | PRO+ |
+| 33 | `GET /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.get(id)` | PRO+ |
+| 34 | `PATCH /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.update(id, params)` | PRO+ |
+| 35 | `DELETE /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.delete(id)` | PRO+ |
+| 36 | `GET /rhc/copytrade/signals` | `client.copyTrade.signals(params?)` | PRO+ |
+| 37 | `GET /rhc/price-alerts` | `client.priceAlerts.list()` | PRO+ |
+| 38 | `POST /rhc/price-alerts` | `client.priceAlerts.create(params)` | PRO+ |
+| 39 | `GET /rhc/price-alerts/{id}` | `client.priceAlerts.get(id)` | PRO+ |
+| 40 | `PATCH /rhc/price-alerts/{id}` | `client.priceAlerts.update(id, params)` | PRO+ |
+| 41 | `DELETE /rhc/price-alerts/{id}` | `client.priceAlerts.delete(id)` | PRO+ |
+| 42 | `GET /rhc/price-alerts/events` | `client.priceAlerts.events(params?)` | PRO+ |
+| 43 | `GET /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.list()` | PRO+ |
+| 44 | `POST /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.create(params)` | PRO+ |
+| 45 | `GET /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.get(id)` | PRO+ |
+| 46 | `PATCH /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.update(id, params)` | PRO+ |
+| 47 | `DELETE /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.delete(id)` | PRO+ |
+| 48 | `GET /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.list()` | ULTRA+ |
+| 49 | `POST /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.create(params)` | ULTRA+ |
+| 50 | `GET /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.get(id)` | ULTRA+ |
+| 51 | `PATCH /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.update(id, params)` | ULTRA+ |
+| 52 | `DELETE /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.delete(id)` | ULTRA+ |
 | + | `POST /stream/token` → WebSocket | `client.stream.connect()` | PRO+ |
 
 ## What you can build
 
-- **KOL copy-trading on Robinhood Chain** — stream `client.kol.feed()` / the `rhc:kol_trades` channel and mirror verified-KOL buys, EVM-native.
+- **KOL copy-trading on Robinhood Chain** — stream `client.kol.feed()` / the `rhc:kol_trades` channel and mirror verified-KOL buys, EVM-native. Or stop polling entirely: `client.copyTrade.create()` has the server watch the tape and push you a signal.
+- **Push instead of poll** — four rule engines (`client.copyTrade`, `client.priceAlerts`, `client.kol.coordinationAlerts`, `client.kol.firstTouchSubscriptions`) deliver over webhook or WebSocket. **Quotas are per chain** — RHC rules never eat your Solana allowance.
 - **Consensus scanner** — `client.kol.hotTokens()` surfaces tokens 2+ KOLs are accumulating; `client.kol.coordination()` adds the cohort composition behind it (per-KOL legs, accumulating vs distributing, exit state).
 - **Discovery bot** — `client.kol.firstTouches()` gives the globally earliest KOL buy per token, filterable to tokens minutes old.
 - **Launch-bundle / rug gate** — `client.tokens.bundle()` flags a same-block early-buyer bundle and how much of supply it still holds; `client.tokens.buyerQuality()` scores the first-20 cohort 0–100 with a dump-cluster ensemble.
@@ -414,6 +442,85 @@ const { wallets } = await client.alphaWallets({
 });
 ```
 
+## Rule engines — push, not polling
+
+Four server-side rule engines watch the Robinhood Chain tape for you and deliver over **webhook**, **WebSocket**, or both. **Every quota is per chain** — configuring RHC rules never consumes your Solana budget, and a full set of Solana rules leaves your RHC capacity untouched. A `webhook_secret` is returned **exactly once** on create (null when `delivery_mode` is `"websocket"`); payloads are signed HMAC-SHA256 over `` `<timestamp>.<body>` `` in the `X-MadeOnSol-Signature` header.
+
+### Copy-trade — `client.copyTrade` (PRO+)
+
+```ts
+const { subscription, webhook_secret } = await client.copyTrade.create({
+  name: "degen desk",
+  source_wallets: ["0xaaa…", "0xbbb…", "0xccc…"], // 1–250, per-tier cap enforced server-side
+  min_trade_eth: 0.01,
+  only_action: "buy",        // buy | sell | both
+  sizing_mode: "fixed",      // fixed | proportional | percent_source
+  sizing_amount: 0.05,       // ETH when sizing_mode is "fixed"
+  delivery_mode: "websocket",
+});
+
+await client.copyTrade.update(subscription.id, { is_active: false });
+await client.copyTrade.delete(subscription.id); // fired signals cascade
+
+// Catch-up path for a missed webhook / dropped WS — fires retained 7 days
+const since = new Date(Date.now() - 3_600_000).toISOString();
+const { signals } = await client.copyTrade.signals({ subscription_id: subscription.id, since });
+```
+
+Sizes are **ETH, not SOL**, and there is deliberately **no market-cap band** — the RHC trade event carries no market cap, so a band could only be a per-event DB lookup in the hot path of a ~3.3M-trades/day chain. `update()` re-checks the per-tier wallet cap, so a rule cannot be PATCHed past its limit.
+
+### Price alerts — `client.priceAlerts` (PRO+)
+
+```ts
+const { alert, evaluation } = await client.priceAlerts.create({
+  token_address: "0xdef…", // must already be tracked on RHC with a market cap
+  drop_pct: 30,            // 0.01–99.99, measured from the MC captured RIGHT NOW
+  recovery_pct: 15,        // omit for a dip-only, terminal alert
+  webhook_url: "https://example.com/hook",
+});
+console.log(evaluation.mode, evaluation.interval_seconds); // "polled", ~15
+
+const { events } = await client.priceAlerts.events({ alert_id: alert.id, event_type: "dip" });
+```
+
+> **RHC price alerts are polled (~15s), not sub-second like the Solana ones.** `rhc_token_prices` is written by the RHC ingester on a separate box and emits no `pg_notify`, so there is nothing to react to — effective latency is that interval plus the token's own price-update cadence. Every create response spells this out in its `evaluation` block. The baseline MC is captured at creation, so an alert is a delta from the moment you set it; alerts self-expire after 30 days, and only `name`, `delivery_mode`, `webhook_url` and `is_active` are mutable (retuning a threshold mid-flight would make the recorded events uninterpretable).
+
+### KOL coordination rules — `client.kol.coordinationAlerts` (PRO+)
+
+```ts
+const { rule, scoring } = await client.kol.coordinationAlerts.create({
+  min_kols: 3,          // 2–50 distinct tracked KOL buyers
+  window_minutes: 15,   // 1–60 rolling window
+  min_score: 40,        // 0–100
+  cooldown_min: 30,     // 1–1440 before the same token can fire again
+  score_jump_break: 20, // score jump that breaks the cooldown early
+  delivery_mode: "websocket",
+});
+await client.kol.coordinationAlerts.update(rule.id, { min_kols: 4 }); // UUID id
+```
+
+> **Coordination scoring is comparable to Solana, but not identical.** The shared v1 scorer runs, `quality` is a real KOL win-rate, and `earliness` is **defaulted** — RHC has no early-entry equivalent. The create response's `scoring` block records which components are real, and every fired signal repeats it in `score_inputs`.
+
+### KOL first-touch subscriptions — `client.kol.firstTouchSubscriptions` (ULTRA+)
+
+```ts
+const { subscription } = await client.kol.firstTouchSubscriptions.create({
+  name: "early hands",
+  filters: {
+    min_first_buy_eth: 0.05,
+    min_kol_winrate: 0.5,   // win-rate on CLOSED positions
+    strategy: "swing",      // scalper | day_trader | swing | inactive | unscored
+    min_mc_usd: 10_000,
+  },
+  delivery_mode: "websocket",
+});
+
+// `filters` is a whole-object REPLACE, not a merge — {} clears every filter
+await client.kol.firstTouchSubscriptions.update(subscription.id, { filters: {} });
+```
+
+> **First-touch filters are not the Solana set.** RHC has no scout score, so `min_scout_tier` and `min_n_touches` do not exist here rather than silently matching nothing; `min_kol_winrate` and `strategy` are the quality gates. Unknown filter keys are rejected with a **400**, not ignored.
+
 ## Streaming — `client.stream` (PRO+)
 
 Managed WebSocket with token fetch + 24h refresh, auto-reconnect with backoff, heartbeat liveness, and typed events. Channels: **`rhc:kol_trades`** and **`rhc:trades`**.
@@ -453,7 +560,7 @@ try {
 
 ## Types & constants
 
-Fully-typed responses and params for all 30 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
+Fully-typed responses and params for all 52 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcTopTradersResponse`, `RhcFlowResponse`, `RhcPeakHistoryResponse`, `RhcRiskResponse`, `RhcHoldersResponse`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, plus the rule engines: `RhcCopyTradeSubscription`, `RhcCopyTradeCreateParams`, `RhcCopyTradeSignal`, `RhcPriceAlert`, `RhcPriceAlertEvaluation`, `RhcPriceAlertEvent`, `RhcCoordinationAlertRule`, `RhcCoordinationAlertScoring`, `RhcFirstTouchSubscription`, `RhcFirstTouchFilters`, `RhcDeletedResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `DeliveryMode`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
 
 ## Links
 

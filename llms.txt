@@ -8,10 +8,11 @@ Robinhood Chain (RHC) is an Arbitrum Orbit L2, chain id 4663. MadeOnSol (https:/
 
 - **KOL Trades**: live buy/sell feed from tracked Solana KOLs' verified EVM wallets, a KOL activity leaderboard, consensus "hot tokens" (2+ KOLs), and per-KOL profiles.
 - **KOL Signals**: coordination (tokens N+ distinct KOLs are buying, with the cohort breakdown) and first touches (the earliest KOL entry per token).
-- **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), same-block launch-bundle detection, and batch reads (50 tokens; 20 for buyer-quality).
+- **Tokens**: token discovery, per-token snapshot (price/MC/FDV/peak/drawdown, deployer reputation, KOL activity, pools), 1-minute OHLC candles, KOL consensus (`net_flow_eth`), early-buyer quality (0–100), same-block launch-bundle detection, top traders by realized ETH, cohort flow, peak history, live on-chain risk (simulated sellability), exact holders from Transfer logs, and batch reads (50 tokens; 20 for buyer-quality).
 - **DEX Trade Tape**: every Uniswap v2/v3/v4 swap with the effective trading account (tx.from, or the ERC-4337 userOp sender when bundled), gas/ordering for MEV analysis, and KOL/deployer flags.
 - **Deployer Hunter**: reputation leaderboard, per-deployer profiles, trajectory, launch history, best tokens, chain-wide stats, the alert feed, and recent graduations (graduation = $40K peak MC, runner = $100K; the elite/good tier rides runner_rate + 24h of deployer history).
 - **Alpha Wallets**: smart-money ranking by realized on-chain performance (net ETH, win rate, memecoin share), with bot-fleet flagging.
+- **Rule engines (push, not polling)**: copy-trade rules, MC dip/recovery price alerts, KOL coordination rules, and KOL first-touch subscriptions — delivered over webhook (HMAC-SHA256 signed) or WebSocket. Quotas are PER CHAIN: RHC rules never consume the Solana allowance.
 - **Streaming**: managed WebSocket for `rhc:kol_trades` and `rhc:trades`.
 
 ## Installation
@@ -29,7 +30,7 @@ import { RobinhoodClient } from "robinhood-chain-sdk";
 const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 ```
 
-## Methods (all 25 endpoints)
+## Methods (all 52 endpoints)
 
 ### KOL (client.kol) — BASIC
 - `client.kol.feed(params?)` — GET /rhc/kol/feed — live KOL trade feed
@@ -49,6 +50,11 @@ const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 - `client.tokens.kolConsensus(address)` — GET /rhc/tokens/{address}/kol-consensus (PRO+)
 - `client.tokens.buyerQuality(address)` — GET /rhc/tokens/{address}/buyer-quality (BASIC)
 - `client.tokens.bundle(address)` — GET /rhc/tokens/{address}/bundle — launch-bundle detection (BASIC)
+- `client.tokens.topTraders(address, params?)` — GET /rhc/tokens/{address}/top-traders — ranked by REALIZED ETH (sell − buy), not PnL (PRO+)
+- `client.tokens.flow(address, window?)` — GET /rhc/tokens/{address}/flow — net flow by cohort; positive net_eth = that cohort distributed (PRO+)
+- `client.tokens.peakHistory(address, params?)` — GET /rhc/tokens/{address}/peak-history — recorded vs observed peak MC + high-water curve (PRO+)
+- `client.tokens.risk(address)` — GET /rhc/tokens/{address}/risk — EVM-native risk computed live on-chain; sellability is simulated, never cached (PRO+)
+- `client.tokens.holders(address, params?)` — GET /rhc/tokens/{address}/holders — exact holders from Transfer logs; check `verified` first, balances are decimal strings (PRO+)
 - `client.tokens.batch(addresses)` — POST /rhc/token/batch — up to 50 tokens in one call; unknown addresses echo back as found:false (BASIC)
 - `client.tokens.batchBuyerQuality(addresses)` — POST /rhc/tokens/batch/buyer-quality — MAX 20 (not the Solana 50 — per-token cohort computation); per-token failures degrade to an error entry (BASIC)
 
@@ -66,6 +72,24 @@ Tier semantics (migrations 267 + 269): elite/good are earned on the $100K runner
 
 ### Alpha Wallets (client.alphaWallets) — PRO+
 - `client.alphaWallets(params?)` — GET /rhc/alpha-wallets — smart-money ranking
+
+### Rule engines — push, not polling
+Quotas are PER CHAIN — RHC rules never consume the Solana allowance. `webhook_secret` is returned once on create (null for delivery_mode "websocket"); webhook payloads are HMAC-SHA256 signed over `<timestamp>.<body>` in X-MadeOnSol-Signature.
+- `client.copyTrade.list()` — GET /rhc/copytrade/subscriptions (PRO+)
+- `client.copyTrade.create(params)` — POST /rhc/copytrade/subscriptions — follow up to 250 wallets; sizes are ETH, and there is NO market-cap band (the RHC trade event carries no market cap) (PRO+)
+- `client.copyTrade.get(id)` / `.update(id, params)` / `.delete(id)` — GET/PATCH/DELETE /rhc/copytrade/subscriptions/{id} — numeric id; update re-checks the per-tier wallet cap (PRO+)
+- `client.copyTrade.signals(params?)` — GET /rhc/copytrade/signals — fire history, retained 7 days (PRO+)
+- `client.priceAlerts.list()` — GET /rhc/price-alerts (PRO+)
+- `client.priceAlerts.create(params)` — POST /rhc/price-alerts — baseline MC captured at creation; token must already be tracked with an MC; alerts expire after 30 days (PRO+)
+- `client.priceAlerts.get(id)` / `.update(id, params)` / `.delete(id)` — GET/PATCH/DELETE /rhc/price-alerts/{id} — numeric id; only name, delivery_mode, webhook_url, is_active are mutable (PRO+)
+- `client.priceAlerts.events(params?)` — GET /rhc/price-alerts/events — dip/recovery fire history, retained 30 days (PRO+)
+- RHC price alerts are POLLED (~15s off rhc_token_prices), NOT sub-second like the Solana alerts — the create response says so in its `evaluation` block.
+- `client.kol.coordinationAlerts.list()` — GET /rhc/kol/coordination/alerts (PRO+)
+- `client.kol.coordinationAlerts.create(params)` — POST /rhc/kol/coordination/alerts — fire when N+ tracked KOLs buy the same token in a rolling window; scoring uses the shared v1 scorer with `earliness` DEFAULTED on RHC and `quality` a real KOL win-rate (PRO+)
+- `client.kol.coordinationAlerts.get(id)` / `.update(id, params)` / `.delete(id)` — GET/PATCH/DELETE /rhc/kol/coordination/alerts/{id} — UUID id (PRO+)
+- `client.kol.firstTouchSubscriptions.list()` — GET /rhc/kol/first-touches/subscriptions (ULTRA+)
+- `client.kol.firstTouchSubscriptions.create(params)` — POST /rhc/kol/first-touches/subscriptions — push on a token's FIRST tracked-KOL buy. Filters are strict (unknown key = 400) and there is NO min_scout_tier/min_n_touches — min_kol_winrate is the quality gate (ULTRA+)
+- `client.kol.firstTouchSubscriptions.get(id)` / `.update(id, params)` / `.delete(id)` — GET/PATCH/DELETE /rhc/kol/first-touches/subscriptions/{id} — UUID id; `filters` is a whole-object REPLACE, not a merge (ULTRA+)
 
 ### Streaming (client.stream) — PRO+
 - `client.stream.getToken()` — POST /stream/token — 24h WS token
