@@ -16,6 +16,7 @@ export type {
   StreamEventName,
   StreamEvent,
   StreamLifecycleEvent,
+  StreamWarning,
   StreamTokenLike,
 } from "./stream.js";
 
@@ -2702,7 +2703,10 @@ class StreamClient {
   /**
    * Open a managed real-time WebSocket stream for Robinhood Chain. Handles token
    * fetch + refresh, auto-reconnect with backoff, heartbeat liveness, and typed
-   * events. Subscribe to `rhc:kol_trades` and/or `rhc:trades`.
+   * events. Subscribe to `rhc:kol_trades`, `rhc:dex_trades` (ULTRA+), and the
+   * four rule-engine channels (`rhc:copytrade:signals`, `rhc:price_alert:events`,
+   * `rhc:kol:coordination`, `rhc:kol:first_touches`). Listen on `"warning"` to
+   * catch server `channels_rejected` frames instead of silence.
    *
    * @example
    * const stream = client.stream.connect();
@@ -2759,7 +2763,7 @@ export class RobinhoodClient {
   readonly copyTrade: CopyTradeClient;
   /** Price-alert rule engine — MC dip/recovery alerts, polled ~15s (PRO+). Quota is per chain. */
   readonly priceAlerts: PriceAlertsClient;
-  /** Managed WebSocket streaming (rhc:kol_trades, rhc:trades) — PRO+. */
+  /** Managed WebSocket streaming (rhc:kol_trades, rhc:dex_trades + the four rule-engine channels) — PRO+. */
   readonly stream: StreamClient;
 
   private readonly _apiKey: string;

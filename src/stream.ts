@@ -10,13 +10,53 @@
  */
 
 /** Robinhood Chain channels you can subscribe to. */
-export type StreamChannel = "rhc:kol_trades" | "rhc:trades";
+export type StreamChannel =
+  | "rhc:kol_trades"          // live KOL tape — PRO+
+  | "rhc:dex_trades"          // full DEX firehose — ULTRA+
+  | "rhc:copytrade:signals"   // your copy-trade rule fires — PRO+, user-scoped
+  | "rhc:price_alert:events"  // your price-alert dips/recoveries — PRO+, user-scoped, ~15s polled
+  | "rhc:kol:coordination"    // your coordination-rule fires — PRO+, user-scoped
+  | "rhc:kol:first_touches"   // first tracked-KOL buy per token — PRO+, broadcast
+  /**
+   * @deprecated `rhc:trades` was never a real server channel — 0.4.0 subscribers
+   * got a `channels_rejected` warning and silence. The server now accepts it as
+   * an alias of `rhc:dex_trades` (and acks it under that name). Subscribe to
+   * `rhc:dex_trades` instead; this literal will be removed in a future major.
+   */
+  | "rhc:trades";
 
 /** Event names delivered on those channels. */
-export type StreamEventName = "rhc:kol_trade" | "rhc:trade";
+export type StreamEventName =
+  | "rhc:kol_trade"            // on rhc:kol_trades
+  | "rhc:dex_trade"            // on rhc:dex_trades (also what the deprecated rhc:trades alias delivers)
+  | "rhc:copytrade:signal"     // on rhc:copytrade:signals
+  | "rhc:price_alert:dip"      // on rhc:price_alert:events
+  | "rhc:price_alert:recovery" // on rhc:price_alert:events
+  | "rhc:kol:coordination"     // on rhc:kol:coordination
+  | "rhc:kol:first_touch";     // on rhc:kol:first_touches
 
 /** Lifecycle events you can also listen for. */
-export type StreamLifecycleEvent = "open" | "close" | "reconnect" | "subscribed" | "heartbeat" | "error";
+export type StreamLifecycleEvent = "open" | "close" | "reconnect" | "subscribed" | "heartbeat" | "warning" | "error";
+
+/**
+ * A server `type: "warning"` frame, surfaced as the `"warning"` lifecycle
+ * event. The one warning the server sends today is `code: "channels_rejected"`
+ * — the channels it refused (unknown or tier-gated), each with a reason, plus
+ * the full list of channels it accepts. 0.4.0 dropped these frames on the
+ * floor, which made a rejected subscribe look like a healthy-but-silent stream.
+ */
+export interface StreamWarning {
+  /** Machine-readable code, e.g. `"channels_rejected"`. */
+  code?: string;
+  /** Channels the server refused, each with a human-readable reason. */
+  rejected?: Array<{ channel: string; reason: string }>;
+  /** Every channel the server accepts. */
+  valid_channels?: string[];
+  /** Optional human-readable message (not sent on every warning). */
+  message?: string;
+  /** Server timestamp (ms). */
+  ts?: number;
+}
 
 export interface StreamEvent<T = unknown> {
   channel: StreamChannel;
@@ -102,9 +142,14 @@ export class RobinhoodStream {
   }
 
   /** Register a handler. Use an event name, `"*"` for every event, or a lifecycle event. */
-  on(event: StreamEventName | StreamLifecycleEvent | "*", fn: Listener): this {
+  on(event: "warning", fn: (warning: StreamWarning, evt?: StreamEvent) => void): this;
+  on(event: StreamEventName | StreamLifecycleEvent | "*", fn: Listener): this;
+  on(
+    event: StreamEventName | StreamLifecycleEvent | "*",
+    fn: Listener | ((warning: StreamWarning, evt?: StreamEvent) => void),
+  ): this {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
-    this.listeners.get(event)!.add(fn);
+    this.listeners.get(event)!.add(fn as Listener);
     return this;
   }
 
@@ -210,6 +255,13 @@ export class RobinhoodStream {
     if (msg.type === "heartbeat") { this.resetHeartbeat(); this.emit("heartbeat", msg.ts); return; }
     if (msg.type === "connected") { return; }
     if (msg.type === "subscribed") { this.emit("subscribed", msg.channels); return; }
+    if (msg.type === "warning") {
+      // e.g. { code: "channels_rejected", rejected: [{channel, reason}], valid_channels }
+      // — never swallow a server warning; a rejected subscribe must not look
+      // like a healthy-but-silent stream (the 0.4.0 bug).
+      this.emit("warning", msg as StreamWarning);
+      return;
+    }
     if (msg.channel && msg.event) {
       const evt = msg as unknown as StreamEvent;
       this.emit(evt.event, evt.data, evt);

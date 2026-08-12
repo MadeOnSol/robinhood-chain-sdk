@@ -13,7 +13,7 @@ Robinhood Chain (RHC) is an Arbitrum Orbit L2, chain id 4663. MadeOnSol (https:/
 - **Deployer Hunter**: reputation leaderboard, per-deployer profiles, trajectory, launch history, best tokens, chain-wide stats, the alert feed, and recent graduations (graduation = $40K peak MC, runner = $100K; the elite/good tier rides runner_rate + 24h of deployer history).
 - **Alpha Wallets**: smart-money ranking by realized on-chain performance (net ETH, win rate, memecoin share), with bot-fleet flagging.
 - **Rule engines (push, not polling)**: copy-trade rules, MC dip/recovery price alerts, KOL coordination rules, and KOL first-touch subscriptions — delivered over webhook (HMAC-SHA256 signed) or WebSocket. Quotas are PER CHAIN: RHC rules never consume the Solana allowance.
-- **Streaming**: managed WebSocket for `rhc:kol_trades` and `rhc:trades`.
+- **Streaming**: managed WebSocket for six channels — `rhc:kol_trades` (PRO+), `rhc:dex_trades` (the DEX firehose, ULTRA+), and the four rule-engine channels `rhc:copytrade:signals`, `rhc:price_alert:events`, `rhc:kol:coordination` (all PRO+, user-scoped) and `rhc:kol:first_touches` (PRO+ broadcast). `rhc:trades` is a deprecated alias of `rhc:dex_trades`. Server `channels_rejected` warnings surface as a `"warning"` event.
 
 ## Installation
 
@@ -93,7 +93,7 @@ Quotas are PER CHAIN — RHC rules never consume the Solana allowance. `webhook_
 
 ### Streaming (client.stream) — PRO+
 - `client.stream.getToken()` — POST /stream/token — 24h WS token
-- `client.stream.connect()` — managed WebSocket (channels: rhc:kol_trades, rhc:trades)
+- `client.stream.connect()` — managed WebSocket. Channels: rhc:kol_trades (PRO+, event rhc:kol_trade), rhc:dex_trades (ULTRA+, event rhc:dex_trade; rhc:trades is a deprecated alias), rhc:copytrade:signals (PRO+, user-scoped, event rhc:copytrade:signal), rhc:price_alert:events (PRO+, user-scoped, ~15s polled, events rhc:price_alert:dip / rhc:price_alert:recovery), rhc:kol:coordination (PRO+, user-scoped, event rhc:kol:coordination), rhc:kol:first_touches (PRO+ broadcast, event rhc:kol:first_touch). Rejected channels (typo/tier gate) emit a "warning" lifecycle event ({ code: "channels_rejected", rejected, valid_channels }) instead of being silently dropped
 
 ## Error handling
 

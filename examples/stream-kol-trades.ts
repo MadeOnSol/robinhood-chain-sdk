@@ -22,6 +22,9 @@ stream
   .on("open", () => console.log("connected — subscribing to rhc:kol_trades"))
   .on("subscribed", (channels) => console.log("subscribed:", channels))
   .on("rhc:kol_trade", (trade) => console.log("KOL trade:", trade))
+  // New in 0.5.0: the server tells you when a channel was refused (typo or
+  // tier gate) instead of leaving the stream silently quiet.
+  .on("warning", (w) => console.warn("stream warning:", w.code, w.rejected))
   .on("error", (err) => console.error("stream error:", err))
   .on("close", () => console.log("stream closed"));
 

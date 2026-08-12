@@ -15,6 +15,14 @@ Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps
 
 The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain to the effective trading account (`tx.from`, or the ERC-4337 userOp sender when the trade was bundled). Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
 
+## New in 0.5.0 — stream fixes
+
+No REST changes; everything below is about `client.stream`.
+
+- **Channel names corrected.** `StreamChannel` now lists the six real RHC channels — `rhc:kol_trades`, `rhc:dex_trades` (the DEX firehose, ULTRA+), `rhc:copytrade:signals`, `rhc:price_alert:events`, `rhc:kol:coordination`, `rhc:kol:first_touches`. 0.4.0's `rhc:trades` never existed server-side; the server now accepts it as a deprecated alias of `rhc:dex_trades`, and the literal stays in the union marked `@deprecated` so 0.4.0 code keeps compiling.
+- **Event names corrected.** The firehose broadcasts `rhc:dex_trade` — a 0.4.0 `on("rhc:trade", …)` handler never fired, and is now a **compile error** so you find it. `StreamEventName` covers all six channels: `rhc:kol_trade`, `rhc:dex_trade`, `rhc:copytrade:signal`, `rhc:price_alert:dip` / `rhc:price_alert:recovery`, `rhc:kol:coordination`, `rhc:kol:first_touch`.
+- **Server warnings surfaced.** The server answers a bad subscribe (typo'd or tier-gated channel) with a `channels_rejected` warning frame — 0.4.0 silently dropped it, so the stream just looked healthy-but-quiet. It now emits a typed `"warning"` lifecycle event (`StreamWarning`: `code`, `rejected`, `valid_channels`, `message`).
+
 ## Quick start (10 seconds)
 
 ```bash
@@ -523,7 +531,18 @@ await client.kol.firstTouchSubscriptions.update(subscription.id, { filters: {} }
 
 ## Streaming — `client.stream` (PRO+)
 
-Managed WebSocket with token fetch + 24h refresh, auto-reconnect with backoff, heartbeat liveness, and typed events. Channels: **`rhc:kol_trades`** and **`rhc:trades`**.
+Managed WebSocket with token fetch + 24h refresh, auto-reconnect with backoff, heartbeat liveness, and typed events. Six RHC channels:
+
+| Channel | Emits | Tier | Scope |
+|---|---|---|---|
+| `rhc:kol_trades` | `rhc:kol_trade` | PRO+ | broadcast — the live KOL tape |
+| `rhc:dex_trades` | `rhc:dex_trade` | **ULTRA+** | broadcast — the full DEX firehose |
+| `rhc:copytrade:signals` | `rhc:copytrade:signal` | PRO+ | user-scoped — only **your** rules' fires |
+| `rhc:price_alert:events` | `rhc:price_alert:dip`, `rhc:price_alert:recovery` | PRO+ | user-scoped; ~15s polled, not sub-second |
+| `rhc:kol:coordination` | `rhc:kol:coordination` | PRO+ | user-scoped — only **your** rules' fires |
+| `rhc:kol:first_touches` | `rhc:kol:first_touch` | PRO+ | broadcast — ULTRA gates only the first-touch *subscription CRUD*, not this channel |
+
+> **Deprecated:** `rhc:trades` was never a real channel — 0.4.0 subscribers got a `channels_rejected` warning and silence. The server now accepts it as an alias of `rhc:dex_trades` (and acks it under the canonical name), and the SDK keeps the literal marked `@deprecated` so 0.4.0 code compiles. Use `rhc:dex_trades`.
 
 ```ts
 const stream = client.stream.connect();
@@ -531,10 +550,13 @@ const stream = client.stream.connect();
 stream
   .on("open", () => console.log("connected"))
   .on("rhc:kol_trade", (trade) => console.log("KOL trade", trade))
-  .on("rhc:trade", (trade) => console.log("DEX trade", trade))
+  .on("rhc:dex_trade", (trade) => console.log("DEX trade", trade))
+  // New in 0.5.0 — the server tells you when a channel was refused (typo or
+  // tier gate); 0.4.0 dropped this frame and the stream just stayed silent.
+  .on("warning", (w) => console.warn("rejected:", w.code, w.rejected, w.valid_channels))
   .on("error", (err) => console.error(err));
 
-stream.subscribe(["rhc:kol_trades", "rhc:trades"]);
+stream.subscribe(["rhc:kol_trades", "rhc:dex_trades"]);
 // …later
 stream.close(); // clean shutdown — short-lived scripts exit promptly
 ```

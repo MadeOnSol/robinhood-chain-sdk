@@ -218,9 +218,18 @@ async function main(): Promise<void> {
     ftDel.deleted,
   );
 
-  // Stream surface.
+  // Stream surface — 0.5.0: real channel/event names + the "warning" lifecycle
+  // event (server channels_rejected frames are surfaced, never dropped).
   const stream: RobinhoodStream = client.stream.connect();
-  stream.on("rhc:trade", (t) => console.log(t)).subscribe(["rhc:trades"]);
+  stream
+    .on("rhc:dex_trade", (t) => console.log(t))
+    .on("rhc:copytrade:signal", (s) => console.log(s))
+    .on("rhc:price_alert:dip", (e) => console.log(e))
+    .on("rhc:price_alert:recovery", (e) => console.log(e))
+    .on("rhc:kol:coordination", (c) => console.log(c))
+    .on("rhc:kol:first_touch", (ft) => console.log(ft))
+    .on("warning", (w) => console.log(w.code, w.rejected, w.valid_channels))
+    .subscribe(["rhc:dex_trades", "rhc:copytrade:signals", "rhc:price_alert:events", "rhc:kol:coordination", "rhc:kol:first_touches"]);
   stream.close();
 }
 
