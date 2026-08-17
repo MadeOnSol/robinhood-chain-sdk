@@ -7,13 +7,15 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 52 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, 1-minute OHLC candles, deployer reputation with alerts and trajectories, smart-money wallet rankings, and four **push rule engines** (copy-trade, price alerts, KOL coordination, first touches) — served from a self-hosted Robinhood Chain node.
+> **Robinhood Chain API / SDK — EVM-native on-chain trading intelligence for Robinhood Chain (chain id 4663).** The official, fully-typed, zero-dependency TypeScript client for all 54 endpoints: live KOL trades and coordination, token discovery, batch reads & launch-bundle detection, the Uniswap DEX trade tape, liquidity removals, tokenized equities, 1-minute OHLC candles, deployer reputation with alerts and trajectories, smart-money wallet rankings, and four **push rule engines** (copy-trade, price alerts, KOL coordination, first touches) — served from a self-hosted Robinhood Chain node.
 
 > ⭐ **[Star on GitHub](https://github.com/madeonsol/robinhood-chain-sdk)** · 📂 **[Examples](./examples/)** · 🌐 **[Robinhood Chain](https://madeonsol.com/robinhood)** · 📚 **[API docs](https://madeonsol.com/api-docs)**
 
 Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps the MadeOnSol Robinhood Chain API — every field is EVM-native (`token_address` lowercase `0x`, `eth_amount`, `tx_hash`, `block_number`, `net_flow_eth`). It runs in Node.js ≥ 18 and edge runtimes with **zero runtime dependencies** (native `fetch`; the WebSocket stream uses the optional `ws` package on Node < 22 and the platform WebSocket everywhere else).
 
 The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain to the effective trading account (`tx.from`, or the ERC-4337 userOp sender when the trade was bundled). Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
+
+> **New in 0.8.0 — tokenized equities + the rug signal.** Two endpoints that were live on the API but had no SDK binding: `client.tokens.equities(params?)` → `GET /rhc/equities` (**BASIC**, typed `RhcEquitiesResponse` / `RhcEquity`) lists every official Robinhood tokenized stock/ETF (NVDA, SPY, AAPL, …) with live price / MC / liquidity and 24h trades / ETH volume / buyer-seller split. **Identity is the issuer BEACON, never the name** — a token is listed only if its contract is an EIP-1967 beacon proxy on Robinhood's issuer beacon, read from our own node; on ship day there were 20 fake "GameStop • Robinhood Token" contracts and 8 fake NVDAs with the exact official suffix, and none appear here. `client.lpEvents(params?)` → `GET /rhc/lp-events` (**PRO+**, typed `RhcLpEventsResponse` / `RhcLpEvent`) is the liquidity **removals** feed — Uniswap v2/v3 `Burn` + v4 `ModifyLiquidity` with a negative delta on tracked pools, each row enriched with the token, the provider wallet, `provider_is_token_deployer` (the classic rug tell) and `provider_kol_name`. Removals ONLY: adds are not persisted, so an empty page means "no removals seen", never "no liquidity activity" — the `coverage` block says `adds_persisted: false`. Amounts are raw uint256 strings; v4 rows carry `liquidity` only. Filter by `token` / `pool` / `provider` / `dex`, cursor via `next_before`. Data since 2026-08-05.
 
 > **New in 0.7.0 — `holder_growth`: who arrived and who left.** `client.tokens.holders(address)` (typed `RhcHoldersResponse`, new `RhcHolderGrowthWindow`) now returns `holder_growth` on `GET /rhc/tokens/{address}/holders`: `{ "1h", "24h", "7d" }` × `{ cutoff_block, entered, entered_still_holding, exited, net }`. *entered* = addresses whose first `Transfer` of the token landed at-or-after the window's cutoff block (any current balance); *entered_still_holding* = those still non-zero; *exited* = pre-existing holders whose last movement in the window left them at zero; *net* ≈ the change in `holder_count`. Pools and burn addresses are excluded from every count. This exists because RHC balances are folded from ERC-20 Transfer logs on our own node — the fold keeps first-seen and last-moved blocks per address and retains zero-balance rows — so it is a direct read, not an estimate; the Solana census is a point-in-time ledger scan with no history and cannot answer this. A window is `null` (never 0) only when the chain had no ingested trades in it; the whole block is `null` only if the growth read failed. Sanity check from ship day: a token launched that morning showed 593 entered / 560 still holding over 24h, and `holder_count` was exactly 560.
 
@@ -58,7 +60,7 @@ const client = new RobinhoodClient({
 
 ## Every endpoint → SDK method
 
-All 52 Robinhood Chain operations live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call. Everything is a `GET` except the two batch reads and the four rule engines at the bottom, which are full CRUD.
+All 54 Robinhood Chain operations live under `https://madeonsol.com/api/v1`. Bearer `msk_` auth on every call. Everything is a `GET` except the two batch reads and the four rule engines at the bottom, which are full CRUD.
 
 | # | Endpoint | SDK method | Tier |
 |---|---|---|---|
@@ -82,38 +84,40 @@ All 52 Robinhood Chain operations live under `https://madeonsol.com/api/v1`. Bea
 | 18 | `GET /rhc/tokens/{address}/holders` | `client.tokens.holders(address, params?)` | PRO+ |
 | 19 | `POST /rhc/token/batch` | `client.tokens.batch(addresses)` — max 50 | BASIC |
 | 20 | `POST /rhc/tokens/batch/buyer-quality` | `client.tokens.batchBuyerQuality(addresses)` — **max 20** | BASIC |
-| 21 | `GET /rhc/deployer-hunter/leaderboard` | `client.deployerHunter.leaderboard(params?)` | BASIC |
-| 22 | `GET /rhc/deployer-hunter/best-tokens` | `client.deployerHunter.bestTokens(params?)` | BASIC |
-| 23 | `GET /rhc/deployer-hunter/stats` | `client.deployerHunter.stats()` | BASIC |
-| 24 | `GET /rhc/deployer-hunter/alerts` | `client.deployerHunter.alerts(params?)` | BASIC |
-| 25 | `GET /rhc/deployer-hunter/recent-bonds` | `client.deployerHunter.recentBonds(params?)` | BASIC |
-| 26 | `GET /rhc/deployer-hunter/{address}` | `client.deployerHunter.profile(address)` | BASIC |
-| 27 | `GET /rhc/deployer-hunter/{address}/trajectory` | `client.deployerHunter.trajectory(address)` | BASIC |
-| 28 | `GET /rhc/deployer-hunter/{address}/tokens` | `client.deployerHunter.tokens(address, params?)` | BASIC |
-| 29 | `GET /rhc/deployer-hunter/{address}/history` | `client.deployerHunter.history(address, params?)` | PRO+ |
-| 30 | `GET /rhc/alpha-wallets` | `client.alphaWallets(params?)` | PRO+ |
-| 31 | `GET /rhc/copytrade/subscriptions` | `client.copyTrade.list()` | PRO+ |
-| 32 | `POST /rhc/copytrade/subscriptions` | `client.copyTrade.create(params)` | PRO+ |
-| 33 | `GET /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.get(id)` | PRO+ |
-| 34 | `PATCH /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.update(id, params)` | PRO+ |
-| 35 | `DELETE /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.delete(id)` | PRO+ |
-| 36 | `GET /rhc/copytrade/signals` | `client.copyTrade.signals(params?)` | PRO+ |
-| 37 | `GET /rhc/price-alerts` | `client.priceAlerts.list()` | PRO+ |
-| 38 | `POST /rhc/price-alerts` | `client.priceAlerts.create(params)` | PRO+ |
-| 39 | `GET /rhc/price-alerts/{id}` | `client.priceAlerts.get(id)` | PRO+ |
-| 40 | `PATCH /rhc/price-alerts/{id}` | `client.priceAlerts.update(id, params)` | PRO+ |
-| 41 | `DELETE /rhc/price-alerts/{id}` | `client.priceAlerts.delete(id)` | PRO+ |
-| 42 | `GET /rhc/price-alerts/events` | `client.priceAlerts.events(params?)` | PRO+ |
-| 43 | `GET /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.list()` | PRO+ |
-| 44 | `POST /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.create(params)` | PRO+ |
-| 45 | `GET /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.get(id)` | PRO+ |
-| 46 | `PATCH /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.update(id, params)` | PRO+ |
-| 47 | `DELETE /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.delete(id)` | PRO+ |
-| 48 | `GET /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.list()` | ULTRA+ |
-| 49 | `POST /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.create(params)` | ULTRA+ |
-| 50 | `GET /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.get(id)` | ULTRA+ |
-| 51 | `PATCH /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.update(id, params)` | ULTRA+ |
-| 52 | `DELETE /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.delete(id)` | ULTRA+ |
+| 21 | `GET /rhc/equities` | `client.tokens.equities(params?)` | BASIC |
+| 22 | `GET /rhc/lp-events` | `client.lpEvents(params?)` | PRO+ |
+| 23 | `GET /rhc/deployer-hunter/leaderboard` | `client.deployerHunter.leaderboard(params?)` | BASIC |
+| 24 | `GET /rhc/deployer-hunter/best-tokens` | `client.deployerHunter.bestTokens(params?)` | BASIC |
+| 25 | `GET /rhc/deployer-hunter/stats` | `client.deployerHunter.stats()` | BASIC |
+| 26 | `GET /rhc/deployer-hunter/alerts` | `client.deployerHunter.alerts(params?)` | BASIC |
+| 27 | `GET /rhc/deployer-hunter/recent-bonds` | `client.deployerHunter.recentBonds(params?)` | BASIC |
+| 28 | `GET /rhc/deployer-hunter/{address}` | `client.deployerHunter.profile(address)` | BASIC |
+| 29 | `GET /rhc/deployer-hunter/{address}/trajectory` | `client.deployerHunter.trajectory(address)` | BASIC |
+| 30 | `GET /rhc/deployer-hunter/{address}/tokens` | `client.deployerHunter.tokens(address, params?)` | BASIC |
+| 31 | `GET /rhc/deployer-hunter/{address}/history` | `client.deployerHunter.history(address, params?)` | PRO+ |
+| 32 | `GET /rhc/alpha-wallets` | `client.alphaWallets(params?)` | PRO+ |
+| 33 | `GET /rhc/copytrade/subscriptions` | `client.copyTrade.list()` | PRO+ |
+| 34 | `POST /rhc/copytrade/subscriptions` | `client.copyTrade.create(params)` | PRO+ |
+| 35 | `GET /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.get(id)` | PRO+ |
+| 36 | `PATCH /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.update(id, params)` | PRO+ |
+| 37 | `DELETE /rhc/copytrade/subscriptions/{id}` | `client.copyTrade.delete(id)` | PRO+ |
+| 38 | `GET /rhc/copytrade/signals` | `client.copyTrade.signals(params?)` | PRO+ |
+| 39 | `GET /rhc/price-alerts` | `client.priceAlerts.list()` | PRO+ |
+| 40 | `POST /rhc/price-alerts` | `client.priceAlerts.create(params)` | PRO+ |
+| 41 | `GET /rhc/price-alerts/{id}` | `client.priceAlerts.get(id)` | PRO+ |
+| 42 | `PATCH /rhc/price-alerts/{id}` | `client.priceAlerts.update(id, params)` | PRO+ |
+| 43 | `DELETE /rhc/price-alerts/{id}` | `client.priceAlerts.delete(id)` | PRO+ |
+| 44 | `GET /rhc/price-alerts/events` | `client.priceAlerts.events(params?)` | PRO+ |
+| 45 | `GET /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.list()` | PRO+ |
+| 46 | `POST /rhc/kol/coordination/alerts` | `client.kol.coordinationAlerts.create(params)` | PRO+ |
+| 47 | `GET /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.get(id)` | PRO+ |
+| 48 | `PATCH /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.update(id, params)` | PRO+ |
+| 49 | `DELETE /rhc/kol/coordination/alerts/{id}` | `client.kol.coordinationAlerts.delete(id)` | PRO+ |
+| 50 | `GET /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.list()` | ULTRA+ |
+| 51 | `POST /rhc/kol/first-touches/subscriptions` | `client.kol.firstTouchSubscriptions.create(params)` | ULTRA+ |
+| 52 | `GET /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.get(id)` | ULTRA+ |
+| 53 | `PATCH /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.update(id, params)` | ULTRA+ |
+| 54 | `DELETE /rhc/kol/first-touches/subscriptions/{id}` | `client.kol.firstTouchSubscriptions.delete(id)` | ULTRA+ |
 | + | `POST /stream/token` → WebSocket | `client.stream.connect()` | PRO+ |
 
 ## What you can build
@@ -122,6 +126,8 @@ All 52 Robinhood Chain operations live under `https://madeonsol.com/api/v1`. Bea
 - **Push instead of poll** — four rule engines (`client.copyTrade`, `client.priceAlerts`, `client.kol.coordinationAlerts`, `client.kol.firstTouchSubscriptions`) deliver over webhook or WebSocket. **Quotas are per chain** — RHC rules never eat your Solana allowance.
 - **Consensus scanner** — `client.kol.hotTokens()` surfaces tokens 2+ KOLs are accumulating; `client.kol.coordination()` adds the cohort composition behind it (per-KOL legs, accumulating vs distributing, exit state).
 - **Discovery bot** — `client.kol.firstTouches()` gives the globally earliest KOL buy per token, filterable to tokens minutes old.
+- **Rug watch** — `client.lpEvents({ token })` is the liquidity-removals feed (removals only, PRO+); flag `provider_is_token_deployer` rows the moment they land.
+- **Tokenized-equity screener** — `client.tokens.equities()` ranks every beacon-verified Robinhood stock/ETF token by 24h volume, trades or MC — no name-matching, so the fake NVDA/GameStop contracts never show up.
 - **Launch-bundle / rug gate** — `client.tokens.bundle()` flags a same-block early-buyer bundle and how much of supply it still holds; `client.tokens.buyerQuality()` scores the first-20 cohort 0–100 with a dump-cluster ensemble.
 - **Portfolio / watchlist refresh** — `client.tokens.batch()` prices up to 50 tokens in one call, `client.tokens.batchBuyerQuality()` scores up to 20.
 - **MEV / sandwich analysis** — `client.trades()` gives every Uniswap v2/v3/v4 swap with the effective trading account (`trader_eoa`), `gas_price`, `tx_index`, and `method_selector`.
@@ -226,11 +232,26 @@ for (const t of trades) {
 }
 ```
 
+## Liquidity removals — `client.lpEvents(params?)` — `GET /rhc/lp-events` (PRO+)
+
+The rug signal. Uniswap v2/v3 `Burn` and v4 `ModifyLiquidity` with a negative delta on tracked pools, straight from our own node's log subscription — each row enriched with the token, the wallet that pulled (`provider`), `provider_is_token_deployer` (the classic rug shape), deployer tier and KOL name. Cursor via `next_before` (same opaque keyset as `client.trades()`).
+
+```ts
+const { events, has_more, next_before, coverage } = await client.lpEvents({ token: "0xdef…", limit: 50 });
+for (const ev of events) {
+  if (ev.provider_is_token_deployer) console.warn("deployer pulled liquidity:", ev.tx_hash, ev.dex, ev.token_amount_raw);
+}
+console.log(coverage.adds_persisted); // false — always
+```
+
+> **Removals ONLY.** Liquidity adds are not persisted (v4 adds share the topic and are dropped at decode; v2/v3 `Mint` is not subscribed), so every row is `event: "remove"` and an empty page means "no removals seen", never "no liquidity activity" — the `coverage` block spells this out. Amounts are **raw uint256 decimal strings** (`liquidity`, `amount0` / `amount1`, plus pre-resolved `token_amount_raw` / `quote_token` / `quote_amount_raw`) — do not `Number()` them; v4 rows carry `liquidity` only because the pool manager emits no token amounts. Filters: `token`, `pool` (v2/v3 address or v4 bytes32 poolId), `provider`, `dex`. Data since 2026-08-05.
+
 ## Token intelligence — `client.tokens`
 
 | Method | Endpoint | Tier | Returns |
 |---|---|---|---|
 | `list(params?)` | `/rhc/tokens` | PRO+ | Live-priced token discovery — MC, liquidity, peak MC + drawdown, launchpad, deployer tier. Sort by `last_trade` / `market_cap` / `liquidity` / `peak_mc`. |
+| `equities(params?)` | `/rhc/equities` | BASIC | Every official Robinhood tokenized stock/ETF — **beacon-verified identity**, live price / MC / liquidity, 24h trades / ETH volume / buyers vs sellers. Sort by `volume` / `trades` / `market_cap` / `last_trade` / `symbol`; `symbol` (exact) / `q` (substring) filters. |
 | `get(address)` | `/rhc/tokens/{address}` | BASIC | Full snapshot: metadata, price/MC/FDV, peak + drawdown, deployer reputation block, KOL activity, pool inventory. |
 | `candles(address, params?)` | `/rhc/tokens/{address}/candles` | PRO+ | 1-minute price + market-cap OHLC, close liquidity, volume with buy/sell split, trade counts. |
 | `kolConsensus(address)` | `/rhc/tokens/{address}/kol-consensus` | PRO+ | KOL buyers vs sellers, `kol_exit_rate`, `net_flow_eth`, median entry MC, first touch. ULTRA adds buyer/exited wallet lists. |
@@ -243,6 +264,19 @@ for (const t of trades) {
 | `peakHistory(address, params?)` | `/rhc/tokens/{address}/peak-history` | PRO+ | Peak MC, drawdown, and a running high-water curve. Returns both the recorded and the candle-derived observed peak. |
 | `risk(address)` | `/rhc/tokens/{address}/risk` | PRO+ | EVM-native risk computed **live**: proxy upgradeability, mint/pause capability, LP custody, and a live honeypot sell-simulation. |
 | `holders(address, params?)` | `/rhc/tokens/{address}/holders` | PRO+ | Exact holder set + concentration, folded from ERC-20 `Transfer` logs and reconciled against on-chain `totalSupply()`, plus `holder_growth` (1h/24h/7d entered / exited / net). |
+
+### Tokenized stocks & ETFs — `equities(params?)` (BASIC)
+
+```ts
+const { equities, total_equities, identity } = await client.tokens.equities({ sort: "volume", limit: 20 });
+for (const e of equities) {
+  console.log(e.symbol, e.name, e.price_usd, "MC", e.market_cap_usd, "24h", e.trades_24h, "trades", e.volume_eth_24h, "ETH", `${e.buyers_24h}b/${e.sellers_24h}s`);
+}
+const nvda = await client.tokens.equities({ symbol: "NVDA" }); // exact ticker, case-insensitive
+console.log(identity.method, identity.issuer_beacon); // "beacon", 0xe10b…151b00
+```
+
+> **Identity is the issuer BEACON, never the name.** A token is listed only if its contract is an EIP-1967 beacon proxy on Robinhood's issuer beacon, read from our own node every 10 minutes — `verified` is `true` by construction and `issuer_beacon` says which beacon. Name-matching would have listed 20 fake "GameStop • Robinhood Token" contracts and 8 fake NVDAs on ship day; none appear here. `name` has the "• Robinhood Token" suffix stripped for display; `onchain_name` is the raw ERC-20 name. 24h stats are cached 60 s (`stats_as_of`).
 
 ### Who is actually making money — `topTraders(address, params?)` (PRO+)
 
@@ -590,7 +624,7 @@ try {
 
 ## Types & constants
 
-Fully-typed responses and params for all 52 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcTopTradersResponse`, `RhcFlowResponse`, `RhcPeakHistoryResponse`, `RhcRiskResponse`, `RhcHoldersResponse`, `RhcHolderGrowthWindow`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, plus the rule engines: `RhcCopyTradeSubscription`, `RhcCopyTradeCreateParams`, `RhcCopyTradeSignal`, `RhcPriceAlert`, `RhcPriceAlertEvaluation`, `RhcPriceAlertEvent`, `RhcCoordinationAlertRule`, `RhcCoordinationAlertScoring`, `RhcFirstTouchSubscription`, `RhcFirstTouchFilters`, `RhcDeletedResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `DeliveryMode`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
+Fully-typed responses and params for all 54 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcTopTradersResponse`, `RhcFlowResponse`, `RhcPeakHistoryResponse`, `RhcRiskResponse`, `RhcHoldersResponse`, `RhcHolderGrowthWindow`, `RhcEquitiesResponse`, `RhcEquity`, `RhcLpEventsResponse`, `RhcLpEvent`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, plus the rule engines: `RhcCopyTradeSubscription`, `RhcCopyTradeCreateParams`, `RhcCopyTradeSignal`, `RhcPriceAlert`, `RhcPriceAlertEvaluation`, `RhcPriceAlertEvent`, `RhcCoordinationAlertRule`, `RhcCoordinationAlertScoring`, `RhcFirstTouchSubscription`, `RhcFirstTouchFilters`, `RhcDeletedResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `DeliveryMode`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
 
 ## Links
 

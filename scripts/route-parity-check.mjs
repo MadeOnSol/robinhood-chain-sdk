@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * route-parity-check.mjs — fails CI if this SDK references an `/rhc/*` API path
- * that is not one of the 40 published Robinhood Chain route patterns (rename
- * drift). 40 patterns, 52 operations — the rule-engine collection and item paths
+ * that is not one of the 54 published Robinhood Chain route patterns (rename
+ * drift). 54 patterns, 54 operations — the rule-engine collection and item paths
  * each serve several methods (GET/POST, GET/PATCH/DELETE).
  *
  * This standalone repo is NOT scanned by the monorepo's sdk-route-parity guard,
- * so it ships its own. The 40 patterns are pinned below (the authoritative RHC
+ * so it ships its own. The 54 patterns are pinned below (the authoritative RHC
  * surface, chain id 4663). Set OPENAPI_URL to instead validate against the live
  * spec's `/rhc/*` paths.
  *
@@ -22,7 +22,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, "..", "src");
 
-// The 40 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
+// The 54 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
 const RHC_ROUTES = [
   "/rhc/alpha-wallets",
   "/rhc/alpha/leaderboard",
@@ -38,6 +38,7 @@ const RHC_ROUTES = [
   "/rhc/deployer-hunter/leaderboard",
   "/rhc/deployer-hunter/recent-bonds",
   "/rhc/deployer-hunter/stats",
+  "/rhc/equities",
   "/rhc/kol/:p",
   "/rhc/kol/coordination",
   "/rhc/kol/coordination/alerts",
@@ -49,6 +50,7 @@ const RHC_ROUTES = [
   "/rhc/kol/hot-tokens",
   "/rhc/kol/leaderboard",
   "/rhc/kol/tokens/hot",
+  "/rhc/lp-events",
   "/rhc/price-alerts",
   "/rhc/price-alerts/:p",
   "/rhc/price-alerts/events",

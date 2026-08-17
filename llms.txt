@@ -30,7 +30,7 @@ import { RobinhoodClient } from "robinhood-chain-sdk";
 const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 ```
 
-## Methods (all 52 endpoints)
+## Methods (all 54 endpoints)
 
 ### KOL (client.kol) — BASIC
 - `client.kol.feed(params?)` — GET /rhc/kol/feed — live KOL trade feed
@@ -43,8 +43,12 @@ const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 ### DEX tape (client.trades) — PRO+
 - `client.trades(params?)` — GET /rhc/trades — Uniswap v2/v3/v4 trade tape
 
+### Liquidity removals (client.lpEvents) — PRO+
+- `client.lpEvents(params?)` — GET /rhc/lp-events — liquidity REMOVALS only (v2/v3 Burn + v4 negative ModifyLiquidity; adds are not persisted, coverage.adds_persisted=false); raw uint256 string amounts; provider_is_token_deployer = rug tell; filters token/pool/provider/dex, cursor next_before
+
 ### Tokens (client.tokens)
 - `client.tokens.list(params?)` — GET /rhc/tokens — token discovery (PRO+)
+- `client.tokens.equities(params?)` — GET /rhc/equities — every official Robinhood tokenized stock/ETF; identity = issuer BEACON (never the name), live price/MC/liquidity + 24h trades/ETH volume/buyers-sellers; sort volume|trades|market_cap|last_trade|symbol, symbol= exact, q= substring (BASIC)
 - `client.tokens.get(address)` — GET /rhc/tokens/{address} — token snapshot (BASIC)
 - `client.tokens.candles(address, params?)` — GET /rhc/tokens/{address}/candles — 1m OHLC (PRO+)
 - `client.tokens.kolConsensus(address)` — GET /rhc/tokens/{address}/kol-consensus (PRO+)

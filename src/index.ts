@@ -436,6 +436,81 @@ export interface RhcTradesResponse {
   _rid?: string;
 }
 
+// ─── Liquidity removals (/rhc/lp-events) ─────────────────────────────────────
+
+export interface RhcLpEventsParams {
+  /** Number of events to return (1–200). Default: 50. */
+  limit?: number;
+  /** Filter to one token address (0x, 40 hex). */
+  token?: string;
+  /** Pool address (v2/v3) or bytes32 poolId (v4). */
+  pool?: string;
+  /** Filter to one liquidity provider — the wallet that pulled (0x, 40 hex). */
+  provider?: string;
+  /** Filter by DEX version. */
+  dex?: UniswapVersion;
+  /** Opaque cursor from `next_before` (same (block_time,id) keyset as /rhc/trades). */
+  before?: string;
+}
+
+/**
+ * One liquidity REMOVAL from `/rhc/lp-events`. Every row is `event: "remove"` —
+ * adds are not persisted. Amounts are raw on-chain uint256 integers as decimal
+ * STRINGS; v4 rows carry `liquidity` only (the pool manager emits no token
+ * amounts), so `amount0` / `amount1` / `token_amount_raw` are null there.
+ */
+export interface RhcLpEvent {
+  event: "remove";
+  pool: string;
+  dex: UniswapVersion;
+  fee_tier: number | null;
+  token_address: string;
+  token_symbol: string | null;
+  token_name: string | null;
+  token_decimals: number | null;
+  launchpad: string | null;
+  /** Wallet that removed liquidity. */
+  provider: string | null;
+  /** True when the provider is the token's own deployer — the classic rug shape. */
+  provider_is_token_deployer: boolean;
+  provider_deployer_tier: string | null;
+  provider_kol_name: string | null;
+  /** Raw liquidity units removed (v3/v4). uint256 as string. */
+  liquidity: string | null;
+  /** Raw token0 amount (v2/v3 only). uint256 as string. */
+  amount0: string | null;
+  /** Raw token1 amount (v2/v3 only). uint256 as string. */
+  amount1: string | null;
+  token0: string | null;
+  token1: string | null;
+  /** amount0 or amount1, whichever is the token side. */
+  token_amount_raw: string | null;
+  quote_token: string | null;
+  quote_amount_raw: string | null;
+  block_number: number;
+  /** Exact block header timestamp (ISO 8601). */
+  block_time: string;
+  tx_hash: string;
+  log_index: number;
+}
+
+export interface RhcLpEventsResponse {
+  chain: Chain;
+  events: RhcLpEvent[];
+  count: number;
+  has_more: boolean;
+  /** Opaque pagination cursor; pass back as `before`. */
+  next_before: string | null;
+  /** Honesty block: `events: ["remove"]`, `adds_persisted: false`, note, since. */
+  coverage: {
+    events: string[];
+    adds_persisted: boolean;
+    note: string;
+    since: string;
+  };
+  _rid?: string;
+}
+
 // ─── Token discovery (/rhc/tokens) ───────────────────────────────────────────
 
 export type RhcTokensSort = "last_trade" | "market_cap" | "liquidity" | "peak_mc";
@@ -479,6 +554,71 @@ export interface RhcTokensListResponse {
   tokens: RhcTokenListItem[];
   count: number;
   sort: string;
+  _rid?: string;
+}
+
+// ─── Tokenized equities (/rhc/equities) ──────────────────────────────────────
+
+export type RhcEquitiesSort = "volume" | "trades" | "market_cap" | "last_trade" | "symbol";
+
+export interface RhcEquitiesParams {
+  /** Ordering. Default: "volume" (24h ETH volume). */
+  sort?: RhcEquitiesSort;
+  /** Number of equities to return (1–300). Default: 100. */
+  limit?: number;
+  /** Exact ticker, case-insensitive (e.g. "NVDA"). */
+  symbol?: string;
+  /** Substring of symbol or name. */
+  q?: string;
+}
+
+/**
+ * One official Robinhood tokenized equity (stock or ETF). Identity is the
+ * issuer BEACON, never the name: a token is listed only if its contract is an
+ * EIP-1967 beacon proxy on Robinhood's issuer beacon (`issuer_beacon`), so the
+ * fake "GameStop • Robinhood Token" contracts never appear here.
+ */
+export interface RhcEquity {
+  token_address: string;
+  symbol: string | null;
+  /** Underlying name with the "• Robinhood Token" suffix stripped (display only). */
+  name: string | null;
+  onchain_name: string | null;
+  asset_class: "equity";
+  /** Always true here — beacon-verified by construction. */
+  verified: boolean;
+  issuer_beacon: string | null;
+  decimals: number | null;
+  listed_at: string | null;
+  price_usd: number | null;
+  price_native: number | null;
+  market_cap_usd: number | null;
+  fdv_usd: number | null;
+  peak_mc_usd: number | null;
+  liquidity_usd: number | null;
+  liquidity_basis: string | null;
+  primary_dex: string | null;
+  primary_pool: string | null;
+  last_trade_time: string | null;
+  trades_24h: number;
+  volume_eth_24h: number;
+  buys_24h: number;
+  sells_24h: number;
+  buyers_24h: number;
+  sellers_24h: number;
+}
+
+export interface RhcEquitiesResponse {
+  chain: Chain;
+  equities: RhcEquity[];
+  count: number;
+  /** Total beacon-verified equities known, before `limit` / filters. */
+  total_equities: number;
+  sort: string;
+  /** How identity is established: `method: "beacon"`, the issuer beacon address, and a note. */
+  identity: { method: string; issuer_beacon: string; note: string };
+  stats_window: "24h";
+  stats_as_of: string;
   _rid?: string;
 }
 
@@ -2439,6 +2579,20 @@ class TokensClient {
   }
 
   /**
+   * Tokenized stocks & ETFs on Robinhood Chain — every official Robinhood
+   * tokenized equity (NVDA, SPY, AAPL, …) with live price / MC / liquidity and
+   * 24h trades / ETH volume / buyer-seller split. **Identity is the issuer
+   * BEACON, never the name**: a token is listed only if its contract is an
+   * EIP-1967 beacon proxy on Robinhood's issuer beacon, read from our own node
+   * — the 20 fake "GameStop • Robinhood Token" contracts never appear here.
+   * 24h stats are cached 60 s. Tier: **BASIC**.
+   * @param params Optional: sort (volume|trades|market_cap|last_trade|symbol), limit (≤300), symbol (exact ticker), q (substring).
+   */
+  equities(params?: RhcEquitiesParams): Promise<RhcEquitiesResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/equities", params as Record<string, string | number | undefined>));
+  }
+
+  /**
    * Full snapshot for one token — metadata, live price/MC/FDV, peak + drawdown,
    * deployer reputation, KOL activity, and pool inventory. Tier: **BASIC**.
    * @param address Token address (0x, 40 hex).
@@ -3174,9 +3328,10 @@ class StreamClient {
 /**
  * Robinhood Chain API client (chain id 4663).
  *
- * All 52 Robinhood Chain endpoints: EVM-native on-chain trading intelligence —
+ * All 54 Robinhood Chain endpoints: EVM-native on-chain trading intelligence —
  * live KOL trades and coordination, token discovery & bundles, the DEX trade
- * tape, OHLC candles, deployer reputation, smart-money wallets, and the four
+ * tape, liquidity removals, tokenized equities, OHLC candles, deployer
+ * reputation, smart-money wallets, and the four
  * push rule engines (copy-trade, price alerts, KOL coordination, first touches).
  * Authenticate with a MadeOnSol `msk_` key (same key, same base URL as the
  * Solana API — Robinhood Chain is bundled into every tier).
@@ -3261,6 +3416,20 @@ export class RobinhoodClient {
    */
   trades(params?: RhcTradesParams): Promise<RhcTradesResponse> {
     return this._request(buildUrl(this._baseUrl, "/rhc/trades", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Liquidity REMOVALS feed — the rug signal. Uniswap v2/v3 `Burn` and v4
+   * `ModifyLiquidity` with a negative delta on tracked pools, from our own
+   * node's log subscription. **Removals only** — adds are not persisted, so an
+   * empty page means "no removals seen", never "no liquidity activity" (the
+   * `coverage` block says so). Amounts are raw uint256 STRINGS; v4 rows carry
+   * `liquidity` only. `provider_is_token_deployer` is the classic rug tell.
+   * Cursor via `next_before`. Data since 2026-08-05. Tier: **PRO+**.
+   * @param params Optional: limit, token, pool (address or v4 poolId), provider, dex, before cursor.
+   */
+  lpEvents(params?: RhcLpEventsParams): Promise<RhcLpEventsResponse> {
+    return this._request(buildUrl(this._baseUrl, "/rhc/lp-events", params as Record<string, string | number | undefined>));
   }
 
   /**

@@ -1,5 +1,5 @@
 /**
- * Type-check smoke test — references every one of the 52 endpoints and the
+ * Type-check smoke test — references every one of the 54 endpoints and the
  * stream client so `npm test` fails if a method signature or type drifts.
  *
  * This does NOT make network calls; it only exercises the type surface. To run
@@ -17,7 +17,9 @@ import {
   type RhcKolCoordinationResponse,
   type RhcKolFirstTouchesResponse,
   type RhcTradesResponse,
+  type RhcLpEventsResponse,
   type RhcTokensListResponse,
+  type RhcEquitiesResponse,
   type RhcTokenSnapshot,
   type RhcCandlesResponse,
   type RhcKolConsensusResponse,
@@ -75,9 +77,12 @@ async function main(): Promise<void> {
 
   // 7: DEX tape
   const tape: RhcTradesResponse = await client.trades({ dex: "uniswap-v3", limit: 25 });
+  // 22: liquidity REMOVALS feed (PRO+) — removals only, raw uint256 string amounts
+  const lp: RhcLpEventsResponse = await client.lpEvents({ token, dex: "uniswap-v3", limit: 25 });
 
-  // 8–20: tokens
+  // 8–21: tokens
   const list: RhcTokensListResponse = await client.tokens.list({ sort: "market_cap", min_mc_usd: 1000 });
+  const equities: RhcEquitiesResponse = await client.tokens.equities({ sort: "volume", limit: 20 }); // beacon-verified only
   const snap: RhcTokenSnapshot = await client.tokens.get(token);
   const candles: RhcCandlesResponse = await client.tokens.candles(token, { limit: 240 });
   const consensus: RhcKolConsensusResponse = await client.tokens.kolConsensus(token);
@@ -91,7 +96,7 @@ async function main(): Promise<void> {
   const batch: RhcTokenBatchResponse = await client.tokens.batch([token]);          // max 50
   const batchQ: RhcBatchBuyerQualityResponse = await client.tokens.batchBuyerQuality([token]); // max 20
 
-  // 21–29: deployer hunter
+  // 23–31: deployer hunter
   const dlb: RhcDeployerLeaderboardResponse = await client.deployerHunter.leaderboard({ tier: "elite", sort: "runner_rate" });
   const dprof: RhcDeployerProfileResponse = await client.deployerHunter.profile(wallet);
   const traj: RhcDeployerTrajectoryResponse = await client.deployerHunter.trajectory(wallet);
@@ -102,10 +107,10 @@ async function main(): Promise<void> {
   const alerts: RhcDeployerAlertsResponse = await client.deployerHunter.alerts({ deployer_tier: "good", include_untradeable: false });
   const bonds: RhcRecentBondsResponse = await client.deployerHunter.recentBonds({ min_peak: 100_000 });
 
-  // 30: alpha wallets
+  // 32: alpha wallets
   const alpha: RhcAlphaWalletsResponse = await client.alphaWallets({ classification: "smart_money", sort: "net_eth" });
 
-  // 31–36: copy-trade rule engine (PRO+). Quotas are PER CHAIN.
+  // 33–38: copy-trade rule engine (PRO+). Quotas are PER CHAIN.
   const ctList: RhcCopyTradeListResponse = await client.copyTrade.list();
   const ctNew: RhcCopyTradeCreateResponse = await client.copyTrade.create({
     name: "degen desk",
@@ -121,7 +126,7 @@ async function main(): Promise<void> {
   const ctSignals: RhcCopyTradeSignalsResponse = await client.copyTrade.signals({ subscription_id: ctNew.subscription.id, limit: 50 });
   const ctDel: RhcDeletedResponse = await client.copyTrade.delete(ctNew.subscription.id);
 
-  // 37–42: price alerts (PRO+) — POLLED ~15s on RHC, not sub-second like Solana.
+  // 39–44: price alerts (PRO+) — POLLED ~15s on RHC, not sub-second like Solana.
   const paList: RhcPriceAlertListResponse = await client.priceAlerts.list();
   const paNew: RhcPriceAlertCreateResponse = await client.priceAlerts.create({
     token_address: token,
@@ -134,7 +139,7 @@ async function main(): Promise<void> {
   const paEvents: RhcPriceAlertEventsResponse = await client.priceAlerts.events({ alert_id: paNew.alert.id, event_type: "dip" });
   const paDel: RhcDeletedResponse = await client.priceAlerts.delete(paNew.alert.id);
 
-  // 43–47: KOL coordination rules (PRO+)
+  // 45–49: KOL coordination rules (PRO+)
   const caList: RhcCoordinationAlertListResponse = await client.kol.coordinationAlerts.list();
   const caNew: RhcCoordinationAlertCreateResponse = await client.kol.coordinationAlerts.create({
     min_kols: 3,
@@ -146,7 +151,7 @@ async function main(): Promise<void> {
   const caUpd: RhcCoordinationAlertGetResponse = await client.kol.coordinationAlerts.update(uuid, { min_score: 40 });
   const caDel: RhcDeletedResponse = await client.kol.coordinationAlerts.delete(uuid);
 
-  // 48–52: KOL first-touch subscriptions (ULTRA+). Unknown filter keys are 400s.
+  // 50–54: KOL first-touch subscriptions (ULTRA+). Unknown filter keys are 400s.
   const ftList: RhcFirstTouchSubscriptionListResponse = await client.kol.firstTouchSubscriptions.list();
   const ftNew: RhcFirstTouchSubscriptionCreateResponse = await client.kol.firstTouchSubscriptions.create({
     name: "early hands",
@@ -168,6 +173,10 @@ async function main(): Promise<void> {
     coord.coordination[0]?.signal,
     touches.events[0]?.first_kol.name,
     tape.trades[0]?.tx_hash,
+    lp.events[0]?.provider_is_token_deployer,
+    lp.coverage.adds_persisted,
+    equities.equities[0]?.symbol,
+    equities.identity.method,
     tape.trades[0]?.trader_eoa,
     list.tokens[0]?.token_address,
     snap.deployer?.tier,
