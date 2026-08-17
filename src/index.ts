@@ -1006,6 +1006,24 @@ export interface RhcHolder {
   is_deployer: boolean;
 }
 
+/**
+ * One holder-growth window (1h / 24h / 7d) on `RhcHoldersResponse.holder_growth`.
+ * Every count is null when the window could not be resolved (the chain had no
+ * ingested trades in it). Pools and burn addresses are excluded from all counts.
+ */
+export interface RhcHolderGrowthWindow {
+  /** Lowest block observed at-or-after now()−window (from our trade ingest, ~10 blocks/s). */
+  cutoff_block: number | null;
+  /** Addresses whose FIRST Transfer of this token landed at-or-after cutoff_block (any current balance). */
+  entered: number | null;
+  /** entered ∩ balance > 0. */
+  entered_still_holding: number | null;
+  /** Pre-existing holders whose last Transfer in the window left them at zero. */
+  exited: number | null;
+  /** entered_still_holding − exited ≈ change in holder_count over the window. */
+  net: number | null;
+}
+
 export interface RhcHoldersResponse {
   chain: Chain;
   token_address: string;
@@ -1031,6 +1049,19 @@ export interface RhcHoldersResponse {
     pool_held_pct: number | null;
     burned_pct: number | null;
     deployer_pct: number | null;
+  } | null;
+  /**
+   * Entered / exited holders per window, read from the Transfer-log fold
+   * (first_seen_block + last_block, zero-balance rows retained). Possible only
+   * because history is retained — the Solana census cannot answer this.
+   * Top-level null only if the growth read failed; a single window is null when
+   * the chain had no ingested trades in it (cutoff unresolvable).
+   */
+  holder_growth: {
+    "1h": RhcHolderGrowthWindow | null;
+    "24h": RhcHolderGrowthWindow | null;
+    "7d": RhcHolderGrowthWindow | null;
+    note: string;
   } | null;
   reconciliation: {
     recon_ok: boolean;
@@ -2527,6 +2558,8 @@ class TokensClient {
    * circulating denominator (the largest holder is otherwise the token's own
    * pool) and reports them as `pool_held_pct` / `burned_pct`. Balances are raw
    * uint256 returned as decimal STRINGS to preserve precision.
+   * `holder_growth.{1h,24h,7d}` adds entered / entered_still_holding / exited /
+   * net (≈ Δ holder_count) per window, read from the same log fold.
    * Tier: **PRO+** (50 rows; ULTRA/BUSINESS raises the cap to 200).
    * @param address Token address (0x, 40 hex).
    */

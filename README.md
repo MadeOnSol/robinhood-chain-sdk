@@ -15,6 +15,8 @@ Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps
 
 The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain to the effective trading account (`tx.from`, or the ERC-4337 userOp sender when the trade was bundled). Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
 
+> **New in 0.7.0 — `holder_growth`: who arrived and who left.** `client.tokens.holders(address)` (typed `RhcHoldersResponse`, new `RhcHolderGrowthWindow`) now returns `holder_growth` on `GET /rhc/tokens/{address}/holders`: `{ "1h", "24h", "7d" }` × `{ cutoff_block, entered, entered_still_holding, exited, net }`. *entered* = addresses whose first `Transfer` of the token landed at-or-after the window's cutoff block (any current balance); *entered_still_holding* = those still non-zero; *exited* = pre-existing holders whose last movement in the window left them at zero; *net* ≈ the change in `holder_count`. Pools and burn addresses are excluded from every count. This exists because RHC balances are folded from ERC-20 Transfer logs on our own node — the fold keeps first-seen and last-moved blocks per address and retains zero-balance rows — so it is a direct read, not an estimate; the Solana census is a point-in-time ledger scan with no history and cannot answer this. A window is `null` (never 0) only when the chain had no ingested trades in it; the whole block is `null` only if the growth read failed. Sanity check from ship day: a token launched that morning showed 593 entered / 560 still holding over 24h, and `holder_count` was exactly 560.
+
 > **New in 0.6.0 — wallet intelligence.** Ten new operations covering the Robinhood Chain wallet surface, which had no SDK binding at all until now: a new `client.wallet` namespace — `profile()`, `pnl()`, `positions()`, `trades()`, `watchlist()`, `track()`, `untrack()`, `relabel()`, `trackedTrades()` and `trackedSummary()`. Everything is **ETH**-denominated, and cost basis is FIFO over a rolling 90-day window — `cost_basis_observable_from` names the date the window opens, so a position opened before it reads as a sell with no matching buy. The profile / PnL / positions trio shares ONE snapshot cache server-side, so calling all three on an address costs roughly one computation rather than three; `cache_hit` says which call paid for it. Watchlist quotas are **per chain** (PRO 50 / ULTRA 100 / BUSINESS 500 RHC wallets), independent of your Solana list.
 
 ## New in 0.5.0 — stream fixes
@@ -240,7 +242,7 @@ for (const t of trades) {
 | `flow(address, window?)` | `/rhc/tokens/{address}/flow` | PRO+ | Net buy/sell split by trader cohort — who is accumulating and who is distributing. |
 | `peakHistory(address, params?)` | `/rhc/tokens/{address}/peak-history` | PRO+ | Peak MC, drawdown, and a running high-water curve. Returns both the recorded and the candle-derived observed peak. |
 | `risk(address)` | `/rhc/tokens/{address}/risk` | PRO+ | EVM-native risk computed **live**: proxy upgradeability, mint/pause capability, LP custody, and a live honeypot sell-simulation. |
-| `holders(address, params?)` | `/rhc/tokens/{address}/holders` | PRO+ | Exact holder set + concentration, folded from ERC-20 `Transfer` logs and reconciled against on-chain `totalSupply()`. |
+| `holders(address, params?)` | `/rhc/tokens/{address}/holders` | PRO+ | Exact holder set + concentration, folded from ERC-20 `Transfer` logs and reconciled against on-chain `totalSupply()`, plus `holder_growth` (1h/24h/7d entered / exited / net). |
 
 ### Who is actually making money — `topTraders(address, params?)` (PRO+)
 
@@ -289,9 +291,13 @@ if (r.flags.includes("upgradeable") || r.capabilities.can_mint) { /* treat with 
 const h = await client.tokens.holders("0xdef…", { limit: 50 });
 if (!h.verified) console.warn("unverified:", h.unverified_reason);
 console.log(h.concentration?.top10_share, h.concentration?.pool_held_pct);
+const g = h.holder_growth?.["24h"];
+if (g) console.log(`24h: +${g.entered_still_holding} / -${g.exited} → net ${g.net}`);
 ```
 
 > Balances are folded from ERC-20 `Transfer` logs — **not** derived from trades — and reconciled against on-chain `totalSupply()` at a pinned block. **Check `verified` first**: `false` means the reconstruction is incomplete for that token and `unverified_reason` says why. Concentration **excludes liquidity pools and burn addresses** from the circulating denominator (the largest holder of a token is otherwise its own pool) and reports them separately as `pool_held_pct` / `burned_pct`. `balance` is a raw uint256 returned as a decimal **string** — do not `Number()` it. Holder addresses may be ERC-4337 smart accounts, so `holder_count` is not a headcount of people.
+>
+> **`holder_growth`** (`RhcHolderGrowthWindow`, keys `"1h"` / `"24h"` / `"7d"` + `note`) reports per window: `entered` (addresses whose first `Transfer` of the token landed at-or-after `cutoff_block`, any current balance), `entered_still_holding` (those still non-zero), `exited` (pre-existing holders whose last `Transfer` in the window left them at zero) and `net` = `entered_still_holding − exited` ≈ Δ `holder_count`. Pools and burns are excluded. A window is `null` only when the chain had no ingested trades in it; the whole object is `null` only if the growth read failed. This is possible because balances are folded from `Transfer` logs with history retained — the Solana census cannot answer it.
 
 ```ts
 // Launch-bundle + quality gate before buying
@@ -584,7 +590,7 @@ try {
 
 ## Types & constants
 
-Fully-typed responses and params for all 52 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcTopTradersResponse`, `RhcFlowResponse`, `RhcPeakHistoryResponse`, `RhcRiskResponse`, `RhcHoldersResponse`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, plus the rule engines: `RhcCopyTradeSubscription`, `RhcCopyTradeCreateParams`, `RhcCopyTradeSignal`, `RhcPriceAlert`, `RhcPriceAlertEvaluation`, `RhcPriceAlertEvent`, `RhcCoordinationAlertRule`, `RhcCoordinationAlertScoring`, `RhcFirstTouchSubscription`, `RhcFirstTouchFilters`, `RhcDeletedResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `DeliveryMode`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
+Fully-typed responses and params for all 52 endpoints are exported (`RhcKolFeedResponse`, `RhcKolCoordinationResponse`, `RhcKolFirstTouchesResponse`, `RhcTradesResponse`, `RhcTokenSnapshot`, `RhcTokenBatchResponse`, `RhcBatchBuyerQualityResponse`, `RhcBundleResponse`, `RhcTopTradersResponse`, `RhcFlowResponse`, `RhcPeakHistoryResponse`, `RhcRiskResponse`, `RhcHoldersResponse`, `RhcHolderGrowthWindow`, `RhcDeployerTrajectoryResponse`, `RhcDeployerTokensResponse`, `RhcDeployerHistoryResponse`, `RhcBestTokensResponse`, `RhcDeployerStatsResponse`, `RhcDeployerAlertsResponse`, `RhcRecentBondsResponse`, `RhcAlphaWalletsResponse`, plus the rule engines: `RhcCopyTradeSubscription`, `RhcCopyTradeCreateParams`, `RhcCopyTradeSignal`, `RhcPriceAlert`, `RhcPriceAlertEvaluation`, `RhcPriceAlertEvent`, `RhcCoordinationAlertRule`, `RhcCoordinationAlertScoring`, `RhcFirstTouchSubscription`, `RhcFirstTouchFilters`, `RhcDeletedResponse`, …), plus shared types (`DeployerTier`, `TradeAction`, `UniswapVersion`, `DeliveryMode`, `RhcBundleKind`, `RhcAlertType`, `RhcAlertPriority`, `RhcCoordinationSignal`) and the `CHAIN_ID` constant (`4663`).
 
 ## Links
 

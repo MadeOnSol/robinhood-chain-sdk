@@ -54,7 +54,7 @@ const client = new RobinhoodClient({ apiKey: "msk_your_api_key_here" });
 - `client.tokens.flow(address, window?)` — GET /rhc/tokens/{address}/flow — net flow by cohort; positive net_eth = that cohort distributed (PRO+)
 - `client.tokens.peakHistory(address, params?)` — GET /rhc/tokens/{address}/peak-history — recorded vs observed peak MC + high-water curve (PRO+)
 - `client.tokens.risk(address)` — GET /rhc/tokens/{address}/risk — EVM-native risk computed live on-chain; sellability is simulated, never cached (PRO+)
-- `client.tokens.holders(address, params?)` — GET /rhc/tokens/{address}/holders — exact holders from Transfer logs; check `verified` first, balances are decimal strings (PRO+)
+- `client.tokens.holders(address, params?)` — GET /rhc/tokens/{address}/holders — exact holders from Transfer logs; check `verified` first, balances are decimal strings; `holder_growth.{1h,24h,7d}` = entered / entered_still_holding / exited / net (≈ Δ holder_count) (PRO+)
 - `client.tokens.batch(addresses)` — POST /rhc/token/batch — up to 50 tokens in one call; unknown addresses echo back as found:false (BASIC)
 - `client.tokens.batchBuyerQuality(addresses)` — POST /rhc/tokens/batch/buyer-quality — MAX 20 (not the Solana 50 — per-token cohort computation); per-token failures degrade to an error entry (BASIC)
 
