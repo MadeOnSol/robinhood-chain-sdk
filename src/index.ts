@@ -2432,7 +2432,20 @@ export interface RhcFirstTouchSubscriptionUpdateParams {
 export interface StreamToken {
   token: string;
   ws_url: string;
-  expires_at?: string;
+  /**
+   * Always `null` since 2026-08-27 — stream tokens never expire. Kept for
+   * wire compatibility only; never schedule a refresh from it.
+   */
+  expires_at: string | null;
+  /** Always `null` since 2026-08-27 (see `expires_at`). */
+  next_refresh_at?: string | null;
+  /**
+   * `true` when this call replaced the previous token (`{ rotate: true }`);
+   * the previous value keeps working for 60 s.
+   */
+  rotated?: boolean;
+  /** Human-readable lifetime statement from the server (e.g. `"never expires"`). */
+  lifetime?: string;
   [key: string]: unknown;
 }
 
@@ -2441,7 +2454,7 @@ export interface StreamToken {
 export interface RobinhoodConfig {
   /**
    * MadeOnSol API key (starts with `msk_`). The same key works across every tier.
-   * Get a key at https://madeonsol.com/pricing (3-day free trial on Pro/Ultra).
+   * Get a key at https://madeonsol.com/pricing.
    */
   apiKey: string;
   /** Max automatic retries on 429 / 5xx / network error (default: 2). */
@@ -3293,22 +3306,37 @@ class WalletClient {
 
 class StreamClient {
   constructor(
-    private readonly _post: <T>(url: string) => Promise<T>,
+    private readonly _post: <T>(url: string, body?: unknown) => Promise<T>,
     private readonly _baseUrl: string,
   ) {}
 
   /**
-   * Generate a 24-hour WebSocket streaming token. Returns `ws_url` for the
-   * Robinhood Chain event stream. Tier: **PRO+**.
+   * Get your WebSocket streaming token. Returns `ws_url` for the Robinhood
+   * Chain event stream. Tier: **PRO+**.
+   *
+   * Stream tokens **never expire** (since 2026-08-27): every call returns the
+   * same token and nothing needs refreshing — `expires_at` / `next_refresh_at`
+   * are always `null`. A token only stops working when the subscription lapses
+   * or you pass `{ rotate: true }`, which replaces it (the previous value keeps
+   * working for 60 s; the response then carries `rotated: true`). The server
+   * never rotates on its own, and a `4001` close means "mint again", never a
+   * timer. Authenticate the handshake with `Authorization: Bearer <token>`
+   * (`?token=` still works and is masked in access logs); RHC channels ride
+   * the same socket and token as Solana.
+   *
+   * @param opts.rotate Replace the current token instead of returning it.
    */
-  getToken(): Promise<StreamToken> {
-    return this._post(buildUrl(this._baseUrl, "/stream/token"));
+  getToken(opts?: { rotate?: boolean }): Promise<StreamToken> {
+    return opts?.rotate
+      ? this._post(buildUrl(this._baseUrl, "/stream/token"), { rotate: true })
+      : this._post(buildUrl(this._baseUrl, "/stream/token"));
   }
 
   /**
-   * Open a managed real-time WebSocket stream for Robinhood Chain. Handles token
-   * fetch + refresh, auto-reconnect with backoff, heartbeat liveness, and typed
-   * events. Subscribe to `rhc:kol_trades`, `rhc:dex_trades` (ULTRA+), and the
+   * Open a managed real-time WebSocket stream for Robinhood Chain. Handles the
+   * token fetch on every (re)connect (stream tokens never expire, so there is
+   * no refresh timer), auto-reconnect with backoff, heartbeat liveness, and
+   * typed events. Subscribe to `rhc:kol_trades`, `rhc:dex_trades` (ULTRA+), and the
    * four rule-engine channels (`rhc:copytrade:signals`, `rhc:price_alert:events`,
    * `rhc:kol:coordination`, `rhc:kol:first_touches`). Listen on `"warning"` to
    * catch server `channels_rejected` frames instead of silence.
@@ -3382,7 +3410,7 @@ export class RobinhoodClient {
     if (!config || !config.apiKey || typeof config.apiKey !== "string") {
       console.error(
         "\n[robinhood-chain-sdk] Missing API key.\n" +
-        "  → Get a key at https://madeonsol.com/pricing (3-day free trial on Pro/Ultra)\n" +
+        "  → Get a key at https://madeonsol.com/pricing\n" +
         "  → Then: new RobinhoodClient({ apiKey: process.env.MADEONSOL_API_KEY })\n",
       );
       throw new Error(

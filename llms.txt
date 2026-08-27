@@ -96,7 +96,7 @@ Quotas are PER CHAIN — RHC rules never consume the Solana allowance. `webhook_
 - `client.kol.firstTouchSubscriptions.get(id)` / `.update(id, params)` / `.delete(id)` — GET/PATCH/DELETE /rhc/kol/first-touches/subscriptions/{id} — UUID id; `filters` is a whole-object REPLACE, not a merge (ULTRA+)
 
 ### Streaming (client.stream) — PRO+
-- `client.stream.getToken()` — POST /stream/token — 24h WS token
+- `client.stream.getToken(opts?)` — POST /stream/token — WS token; NEVER expires (same token every call, expires_at/next_refresh_at always null), `{ rotate: true }` replaces it (old one valid 60 s more); 4001 close = mint again, never a timer
 - `client.stream.connect()` — managed WebSocket. Channels: rhc:kol_trades (PRO+, event rhc:kol_trade), rhc:dex_trades (ULTRA+, event rhc:dex_trade; rhc:trades is a deprecated alias), rhc:copytrade:signals (PRO+, user-scoped, event rhc:copytrade:signal), rhc:price_alert:events (PRO+, user-scoped, ~15s polled, events rhc:price_alert:dip / rhc:price_alert:recovery), rhc:kol:coordination (PRO+, user-scoped, event rhc:kol:coordination), rhc:kol:first_touches (PRO+ broadcast, event rhc:kol:first_touch). Rejected channels (typo/tier gate) emit a "warning" lifecycle event ({ code: "channels_rejected", rejected, valid_channels }) instead of being silently dropped
 
 ## Error handling

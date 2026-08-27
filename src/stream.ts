@@ -2,8 +2,11 @@
  * Real-time WebSocket streaming client for Robinhood Chain (chain id 4663).
  *
  * Wraps the connect → token → subscribe → event loop with auto-reconnect,
- * 24h-token auto-refresh, heartbeat liveness, and typed events, so consumers
- * never hand-roll connection management. Obtain one via `client.stream.connect()`.
+ * heartbeat liveness, and typed events, so consumers never hand-roll
+ * connection management. The stream token is fetched on every (re)connect;
+ * stream tokens never expire (since 2026-08-27), so there is no refresh
+ * timer — a `4001` close means the token was rotated or the subscription
+ * lapsed, and the reconnect simply mints again. Obtain one via `client.stream.connect()`.
  *
  * Works in Node (global `WebSocket` on Node 22+, else lazily imports the
  * optional `ws` package) and the browser (native WebSocket). Zero required deps.
@@ -72,7 +75,10 @@ export interface StreamTokenLike {
 }
 
 export interface StreamClientOptions {
-  /** Returns a fresh 24h stream token (wired by client.stream.connect()). */
+  /**
+   * Returns the stream token (wired by client.stream.connect()). Called on
+   * every (re)connect; tokens never expire, so it is never called on a timer.
+   */
   getToken: () => Promise<StreamTokenLike>;
   /** Reconnect automatically on drop (default: true). */
   autoReconnect?: boolean;
