@@ -124,6 +124,7 @@ async function resolveWebSocket(override?: unknown): Promise<new (url: string) =
   );
 }
 
+const CONNECTING = 0;
 const OPEN = 1;
 
 export class RobinhoodStream {
@@ -191,7 +192,18 @@ export class RobinhoodStream {
 
   /** Open the connection (also called implicitly by subscribe). */
   async connect(): Promise<void> {
-    if (this.connecting || (this.ws && this.ws.readyState === OPEN)) return;
+    // `connecting` only covers the awaits above; it is cleared in the `finally`
+    // below as soon as the socket is constructed and its handlers are wired,
+    // while the socket itself is still CONNECTING. Without counting that state
+    // a `subscribe()` landing in the gap opens a second socket, which delivers
+    // every event twice and leaves the first one unreferenced, so `close()`
+    // cannot reach it. A socket that is connecting is already the connection.
+    if (
+      this.connecting ||
+      (this.ws && (this.ws.readyState === CONNECTING || this.ws.readyState === OPEN))
+    ) {
+      return;
+    }
     this.closedByUser = false;
     this.connecting = true;
     try {
