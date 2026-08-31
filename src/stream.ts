@@ -199,6 +199,11 @@ export class RobinhoodStream {
         resolveWebSocket(this.opts.WebSocketImpl),
         this.opts.getToken(),
       ]);
+      // close() may have run while we were awaiting the token. It can only null
+      // out the socket that exists when it is called, so opening this one now
+      // would leave a live socket and heartbeat timer behind a close() the
+      // caller has already made. Honour the close instead.
+      if (this.closedByUser) return;
       const url = `${token.ws_url}?token=${encodeURIComponent(token.token)}`;
       const ws = new WS(url);
       this.ws = ws;
