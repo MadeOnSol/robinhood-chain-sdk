@@ -2457,7 +2457,9 @@ export interface RobinhoodConfig {
    * Get a key at https://madeonsol.com/pricing.
    */
   apiKey: string;
-  /** Max automatic retries on 429 / 5xx / network error (default: 2). */
+  /** Max automatic GET retries on 429 / 5xx / network error (default: 2).
+   * POST, PATCH and DELETE are sent once; failures can have an unknown outcome.
+   */
   maxRetries?: number;
   /** Override the API base URL (advanced/testing). Default: https://madeonsol.com/api/v1 */
   baseUrl?: string;
@@ -3487,6 +3489,10 @@ export class RobinhoodClient {
   }
 
   private async _send<T>(method: string, url: string, body?: unknown): Promise<T> {
+    // A lost response does not mean the server rejected a mutation. Until an
+    // endpoint has an end-to-end idempotency contract, never replay non-GETs
+    // (including token rotation and POST-based batch reads).
+    const maxRetries = method === "GET" ? this._maxRetries : 0;
     const init: RequestInit = {
       method,
       headers: body !== undefined
@@ -3496,14 +3502,14 @@ export class RobinhoodClient {
     };
 
     let lastErr: unknown;
-    for (let attempt = 0; attempt <= this._maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       let response: Response;
       try {
         response = await fetch(url, init);
       } catch (err) {
-        // Network-level failure — retry with backoff, else surface it.
+        // Only GETs may retry network failures; mutations surface them once.
         lastErr = err;
-        if (attempt < this._maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(this._backoffMs(attempt, null));
           continue;
         }
@@ -3515,7 +3521,7 @@ export class RobinhoodClient {
       }
 
       // Retry rate-limits and transient server errors, honoring Retry-After / X-RateLimit-Reset.
-      if ((response.status === 429 || response.status >= 500) && attempt < this._maxRetries) {
+      if ((response.status === 429 || response.status >= 500) && attempt < maxRetries) {
         await sleep(this._backoffMs(attempt, response));
         continue;
       }
@@ -3524,7 +3530,7 @@ export class RobinhoodClient {
     }
     // Unreachable in practice — the loop either returns or throws — but satisfies the type checker.
     throw new RobinhoodError(
-      `Request failed after ${this._maxRetries + 1} attempts`,
+      `Request failed after ${maxRetries + 1} attempts`,
       0,
       lastErr ?? null,
     );
