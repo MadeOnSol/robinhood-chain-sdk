@@ -56,7 +56,7 @@ Get a free API key at **[madeonsol.com/pricing](https://madeonsol.com/pricing)**
 ```ts
 const client = new RobinhoodClient({
   apiKey: process.env.MADEONSOL_API_KEY!,
-  maxRetries: 2, // optional — auto-retry on 429 / 5xx with backoff (default 2)
+  maxRetries: 2, // optional — GET retries on network errors / 429 / 5xx (default 2)
 });
 ```
 
@@ -609,7 +609,9 @@ On **Node < 22**, install the optional `ws` package (`npm i ws`) for the fastest
 
 ## Error handling
 
-Every method throws `RobinhoodError` on a non-2xx response, with `.status`, `.body`, `.message`, and `.requestId` (the API's `_rid` — include it when reporting issues). Rate-limits (`429`) and transient server errors (`5xx`) are retried automatically with exponential backoff, honoring `Retry-After` / `X-RateLimit-Reset`.
+Every method throws `RobinhoodError` on a non-2xx response, with `.status`, `.body`, `.message`, and `.requestId` (the API's `_rid` — include it when reporting issues). GET requests retry network failures, rate-limits (`429`) and transient server errors (`5xx`) up to `maxRetries`, with exponential backoff and `Retry-After` / `X-RateLimit-Reset` hints.
+
+POST, PATCH and DELETE requests have **no automatic retries**, regardless of `maxRetries`. This includes rule creation, updates/deletion, wallet tracking, stream-token retrieval/rotation, and the two POST-based batch reads. A network failure or server error may arrive **after the server applied a change**. Inspect the current rule, watchlist or token state before deciding whether to issue another mutation; do not wrap creates or rotations in a blind retry loop. This client policy prevents automatic replay, but does not provide server-side idempotency or exactly-once execution.
 
 ```ts
 import { RobinhoodError } from "robinhood-chain-sdk";
