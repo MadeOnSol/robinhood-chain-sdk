@@ -9,7 +9,7 @@ import { RobinhoodStream } from "./stream.js";
 import type { StreamClientOptions } from "./stream.js";
 import { VERSION } from "./version.js";
 
-export { RobinhoodStream } from "./stream.js";
+export { RobinhoodStream, STREAM_CHANNELS } from "./stream.js";
 export type {
   StreamClientOptions,
   StreamChannel,
@@ -17,6 +17,10 @@ export type {
   StreamEvent,
   StreamLifecycleEvent,
   StreamWarning,
+  StreamCursor,
+  StreamReplayResult,
+  StreamGap,
+  StreamFatal,
   StreamTokenLike,
 } from "./stream.js";
 
@@ -2185,14 +2189,22 @@ export interface RhcPriceAlertCreateParams {
 }
 
 /**
- * How RHC alerts are evaluated. **Not parity with Solana**: these are polled off
- * `rhc_token_prices` rather than reacting to a live price loop, because the RHC
- * price writer emits no `pg_notify`. Effective latency is the poll interval plus
- * the token's own price-update cadence.
+ * How RHC alerts are evaluated. Since 2026-09-15 they are **event-driven** off
+ * the `rhc:dex_trade` feed (each trade re-evaluates the alerts on its token),
+ * with a price-table poll (`fallback_poll_seconds`: fast while the feed is
+ * degraded or a trade carried no market cap, slow otherwise) and a trade-tape
+ * replay after a feed outage as safety nets. Latency is a few seconds (the
+ * chain trade flush is ~2 s) — **not** parity with the sub-second Solana
+ * alerts. Older servers answered `mode: "polled"` (a ~15 s poll).
  */
 export interface RhcPriceAlertEvaluation {
-  mode: "polled";
+  mode: "event_driven" | "polled";
+  /** The feed that triggers evaluation (`"rhc:dex_trade"`); absent when `polled`. */
+  trigger?: string;
+  /** Kept for compatibility: now the fast fallback poll (was the 15 s poll interval). */
   interval_seconds: number;
+  /** Safety-net price-table poll intervals in seconds. */
+  fallback_poll_seconds?: { fast: number; slow: number };
   note: string;
 }
 
@@ -2984,11 +2996,10 @@ class CopyTradeClient {
 /**
  * Market-cap dip/recovery alerts on Robinhood Chain tokens. Quota is per chain.
  *
- * **RHC alerts are polled (~15s), not sub-second like the Solana ones.**
- * `rhc_token_prices` is written by the RHC ingester on a separate box and emits
- * no `pg_notify`, so there is nothing to react to — effective latency is the
- * poll interval plus the token's own price-update cadence. Every create response
- * spells this out in its `evaluation` block. Tier: **PRO+**.
+ * **RHC alerts are event-driven off each RHC trade (`rhc:dex_trade`), with
+ * price-table polls as a safety net — latency is a few seconds, not sub-second
+ * like the Solana ones.** Every create response spells this out in its
+ * `evaluation` block. Tier: **PRO+**.
  */
 class PriceAlertsClient {
   constructor(
@@ -3397,7 +3408,7 @@ export class RobinhoodClient {
   readonly deployerHunter: DeployerHunterClient;
   /** Copy-trade rule engine — follow wallets, get pushed a signal when they trade (PRO+). Quota is per chain. */
   readonly copyTrade: CopyTradeClient;
-  /** Price-alert rule engine — MC dip/recovery alerts, polled ~15s (PRO+). Quota is per chain. */
+  /** Price-alert rule engine — MC dip/recovery alerts, event-driven off each trade (PRO+). Quota is per chain. */
   readonly priceAlerts: PriceAlertsClient;
   /** Wallet intelligence — 90-day ETH profile, FIFO PnL, open positions, per-wallet tape, and the per-chain watchlist (PRO+). */
   readonly wallet: WalletClient;

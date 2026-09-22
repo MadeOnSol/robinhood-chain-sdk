@@ -15,6 +15,8 @@ Robinhood Chain (RHC) is an **Arbitrum Orbit L2, chain id 4663**. This SDK wraps
 
 The KOL→EVM mapping is unique to MadeOnSol: each tracked Solana KOL's Robinhood-Chain wallet is recovered by tracing their Solana→EVM bridge deposits (deBridge / Relay / Mayan / Wormhole), then attributed on-chain to the effective trading account (`tx.from`, or the ERC-4337 userOp sender when the trade was bundled). Robinhood Chain coverage is **bundled into every MadeOnSol tier at no extra cost — same `msk_` API key, same base URL** as the Solana product.
 
+> **New in 0.9.0 — stream recovery: resume cursor, de-duplication, honest gaps.** The managed stream now tracks the cursor `{ instance, seq, ts }` of the last frame your handlers finished and resumes after it on every reconnect (the v1 `resume` request, with an automatic fallback to `replay_since_seq` / `replay_since_ts` on older servers). Delivery is at-least-once, de-duplicated by event `id`; new lifecycle events `cursor`, `replay`, `gap` (what could not be recovered — a `seq` gap is never loss) and `fatal`. Close codes are handled: 4001 re-fetches the token (bounded), 4002 waits ≥ 60 s instead of looping every second, 4003 stops, 4008 resumes; the backoff resets only after a `subscribed` ack. Every server `warning` frame is emitted (incl. `channels_rejected` / `channels_revoked`). `StreamChannel` / `STREAM_CHANNELS` now list all nine RHC channels (adds `rhc:dex_trades_unattributed`, `rhc:new_tokens`, `rhc:token_locks`); `RhcPriceAlertEvaluation.mode` is `"event_driven" | "polled"` with the new optional `trigger` / `fallback_poll_seconds`. See the stream section's "Recovery" notes.
+
 > **New in 0.8.2 — mutation calls are no longer retried automatically (security fix, SDK-02).** A lost response or transient network error after a `POST`/`PATCH`/`DELETE` (rule create, watchlist change, `stream.rotate()`) used to retry automatically — which could duplicate a rule or rotate a token twice. Mutating calls (including the batch-read POST endpoints) now make exactly one attempt; `GET` retries/backoff (`maxRetries`) are unchanged. If a mutating call fails, check current state before deciding whether to retry by hand. No public API/type changes.
 >
 > **New in 0.8.1 — stream tokens never expire.** `POST /stream/token` now returns the **same token on every call, forever** (server change of 2026-08-27). `StreamToken.expires_at` is typed `string | null` and `next_refresh_at` `string | null` — both are **always `null`** now and kept only for wire compatibility; the response gained `rotated: boolean` and `lifetime: string`. A token only stops working when the subscription lapses or you replace it with the new `client.stream.getToken({ rotate: true })` (the previous value keeps working for 60 s). The server never rotates on its own and never sends `token_refresh` unless you rotated; a `4001` close means "mint again", never a timer. Preferred handshake auth is `Authorization: Bearer <token>` (`?token=` still works and is masked in access logs); RHC channels ride the same socket and token as Solana. `client.stream.connect()` already fetched a token on every (re)connect and never read `expires_at`, so its behavior is unchanged — only its docs are.
@@ -532,12 +534,12 @@ const { alert, evaluation } = await client.priceAlerts.create({
   recovery_pct: 15,        // omit for a dip-only, terminal alert
   webhook_url: "https://example.com/hook",
 });
-console.log(evaluation.mode, evaluation.interval_seconds); // "polled", ~15
+console.log(evaluation.mode, evaluation.trigger, evaluation.fallback_poll_seconds); // "event_driven", "rhc:dex_trade", { fast: 5, slow: 60 }
 
 const { events } = await client.priceAlerts.events({ alert_id: alert.id, event_type: "dip" });
 ```
 
-> **RHC price alerts are polled (~15s), not sub-second like the Solana ones.** `rhc_token_prices` is written by the RHC ingester on a separate box and emits no `pg_notify`, so there is nothing to react to — effective latency is that interval plus the token's own price-update cadence. Every create response spells this out in its `evaluation` block. The baseline MC is captured at creation, so an alert is a delta from the moment you set it; alerts self-expire after 30 days, and only `name`, `delivery_mode`, `webhook_url` and `is_active` are mutable (retuning a threshold mid-flight would make the recorded events uninterpretable).
+> **RHC price alerts are event-driven, but not sub-second like the Solana ones.** Since 2026-09-15 alerts are evaluated as trades land on the `rhc:dex_trade` feed, with a price-table poll (every 5 s while the feed is degraded or a trade carried no market cap, every 60 s otherwise) and a trade-tape replay after a feed outage as safety nets — latency is a few seconds (the chain trade flush is ~2 s). Every create response spells this out in its `evaluation` block (`mode: "event_driven"`, `trigger`, `fallback_poll_seconds`; `interval_seconds` is kept for compatibility). The baseline MC is captured at creation, so an alert is a delta from the moment you set it; alerts self-expire after 30 days, and only `name`, `delivery_mode`, `webhook_url` and `is_active` are mutable (retuning a threshold mid-flight would make the recorded events uninterpretable).
 
 ### KOL coordination rules — `client.kol.coordinationAlerts` (PRO+)
 
@@ -577,16 +579,19 @@ await client.kol.firstTouchSubscriptions.update(subscription.id, { filters: {} }
 
 ## Streaming — `client.stream` (PRO+)
 
-Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Six RHC channels:
+Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Nine RHC channels:
 
 | Channel | Emits | Tier | Scope |
 |---|---|---|---|
 | `rhc:kol_trades` | `rhc:kol_trade` | PRO+ | broadcast — the live KOL tape |
 | `rhc:dex_trades` | `rhc:dex_trade` | **ULTRA+** | broadcast — the full DEX firehose |
+| `rhc:dex_trades_unattributed` | `rhc:dex_trade_unattributed` | **ULTRA+** | broadcast — trades on pools with no single "token" side (e.g. WETH/USDG); subscribe with `rhc:dex_trades` for full coverage |
+| `rhc:new_tokens` | `rhc:new_token` | **ULTRA+** | broadcast — a token's symbol/name/decimals resolved for the first time |
 | `rhc:copytrade:signals` | `rhc:copytrade:signal` | PRO+ | user-scoped — only **your** rules' fires |
-| `rhc:price_alert:events` | `rhc:price_alert:dip`, `rhc:price_alert:recovery` | PRO+ | user-scoped; ~15s polled, not sub-second |
+| `rhc:price_alert:events` | `rhc:price_alert:dip`, `rhc:price_alert:recovery` | PRO+ | user-scoped; event-driven off each trade (a few seconds), not sub-second |
 | `rhc:kol:coordination` | `rhc:kol:coordination` | PRO+ | user-scoped — only **your** rules' fires |
 | `rhc:kol:first_touches` | `rhc:kol:first_touch` | PRO+ | broadcast — ULTRA gates only the first-touch *subscription CRUD*, not this channel |
+| `rhc:token_locks` | `rhc:token_lock` | PRO+ | broadcast — a token lock / vesting contract created on chain |
 
 > **Deprecated:** `rhc:trades` was never a real channel — 0.4.0 subscribers got a `channels_rejected` warning and silence. The server now accepts it as an alias of `rhc:dex_trades` (and acks it under the canonical name), and the SDK keeps the literal marked `@deprecated` so 0.4.0 code compiles. Use `rhc:dex_trades`.
 
@@ -608,6 +613,28 @@ stream.close(); // clean shutdown — short-lived scripts exit promptly
 ```
 
 On **Node < 22**, install the optional `ws` package (`npm i ws`) for the fastest clean exit; on Node ≥ 22 and in browsers the platform WebSocket is used automatically. You can also inject an implementation via `client.stream.connect({ WebSocketImpl })`.
+
+### Recovery: cursor, resume, de-duplication *(new in 0.9.0)*
+
+The stream client keeps a **resume cursor** `{ instance, seq, ts }` — the position of the last frame your handlers finished — and on every reconnect asks the server to resume after it (`subscribe { …, resume }`).
+
+- **"Processed"** means every handler for that frame returned, or the promise it returned settled. Return a promise from an async handler and the cursor waits for it (and for every earlier frame). A handler that throws or rejects still counts as processed; the error goes to `error`.
+- **At-least-once, never exactly-once.** After a reconnect a frame can arrive again. The client drops ids it delivered recently (the last 10,000, option `dedupeSize`); anything you persist should still dedupe on `evt.id`. Replayed frames carry `evt.replayed === true`.
+- **Persistence.** The cursor lives in memory. Save `stream.getCursor()` (or on every `cursor` event) and pass it back as `{ resume }` to continue after a process restart.
+- **Gaps.** `seq` is a server-global ordinal: gaps in it are normal (other channels, other users) and never mean loss. Only a `gap` event does — it lists what the server could not recover (`reasons`: `ring_truncated`, `instance_changed`, `backpressure`, `window_exceeded`, `row_cap`, `not_reconstructable`, or client-side `replay_timeout`; `channels` per channel). Backfill that window from REST. `replay` reports every resume's outcome (`protocol`, `received`, `delivered`, `duplicates`, `complete`).
+- **Older servers.** Against a server that does not understand `resume` yet, the client falls back to `replay_since_seq` (same server process) or `replay_since_ts` (the server restarted). That only covers the server's in-memory buffer (minutes), and a restart is reported as a `gap` with `instance_changed`.
+- **Close codes.** `4001` → the token is re-fetched and the client reconnects (`maxAuthRetries`, default 3, then `fatal`); `4002` connection limit → `error` plus a wait of at least 60 s (`connectionLimitBackoffMs`) — free a ghost slot with the stream-sessions API; `4003` → `fatal`, the client stops; `4008` slow consumer → reconnect and resume. The backoff resets only when the server acks a subscribe, never on a bare socket open.
+- **Warnings.** `warning` fires for every server warning frame, including `channels_rejected` and `channels_revoked` (a channel dropped after a plan change). A rejected or revoked channel is silent, so handle it.
+
+```ts
+const stream = client.stream.connect({ resume: loadCursor() ?? undefined });
+stream.on("*", async (data, evt) => {
+  await store.upsert(evt!.id, data); // the cursor advances once this resolves
+});
+stream.on("cursor", (c) => saveCursor(c));        // { instance, seq, ts }
+stream.on("gap", (g) => console.warn("not recovered:", g.reasons, g.channels));
+stream.on("fatal", (f) => console.error("stream stopped:", f.code, f.reason));
+```
 
 ## Error handling
 

@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   const ctSignals: RhcCopyTradeSignalsResponse = await client.copyTrade.signals({ subscription_id: ctNew.subscription.id, limit: 50 });
   const ctDel: RhcDeletedResponse = await client.copyTrade.delete(ctNew.subscription.id);
 
-  // 39–44: price alerts (PRO+) — POLLED ~15s on RHC, not sub-second like Solana.
+  // 39–44: price alerts (PRO+) — event-driven off each RHC trade (a few seconds), not sub-second like Solana.
   const paList: RhcPriceAlertListResponse = await client.priceAlerts.list();
   const paNew: RhcPriceAlertCreateResponse = await client.priceAlerts.create({
     token_address: token,
