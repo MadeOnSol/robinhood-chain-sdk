@@ -21,6 +21,8 @@ export type {
   StreamReplayResult,
   StreamGap,
   StreamFatal,
+  StreamSubscription,
+  StreamSubscribeOptions,
   StreamTokenLike,
 } from "./stream.js";
 
