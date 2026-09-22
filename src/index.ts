@@ -2269,6 +2269,142 @@ export interface RhcPriceAlertEvent {
   delivered_at: string | null;
 }
 
+/* ── WebSocket payloads: rhc:dex_trade(_unattributed) enrichment + rhc:token_price (WS Phase 2, 2026-09-22) ── */
+
+/** One side of a swap as the server resolved it. `decimals` null = not yet enriched. */
+export interface RhcSideIdentity {
+  address: string | null;
+  symbol: string | null;
+  decimals: number | null;
+}
+
+/** known: decimals AND symbol resolved · pending: token seen, enrichment queued · unknown: never seen. */
+export type RhcMetadataStatus = "known" | "pending" | "unknown";
+/** fresh: swap-derived quote inside the producer's 60-min freshness rule · stale: priced through the v4 pool-state fallback · none: unpriced. */
+export type RhcPriceStatus = "fresh" | "stale" | "none";
+export type RhcPriceSource = "swap_quote" | "pool_state_quote";
+/** Why `mc_usd` is null (or "ok"). `liquidity_gate` = MC exceeded pool TVL x 50,000, the same gate that nulls the stored MC. */
+export type RhcMcStatus = "ok" | "no_price" | "no_supply" | "dust" | "ceiling" | "liquidity_gate" | "no_liquidity";
+export type RhcSideReason = "both_sides_quote" | "no_recognized_quote";
+
+/**
+ * `rhc:dex_trade` frame `data` (channel `rhc:dex_trades`, ULTRA+). Every field
+ * that existed before 2026-09-22 keeps its name; the block from
+ * `amount_in_raw` down is the additive enrichment. `*_raw` amounts are uint256
+ * as EXACT decimal strings — never parse them into a float. A KOL trade also
+ * appears on `rhc:kol_trades` with the same `tx_hash` + `log_index` (different
+ * event id). The durable backfill rebuilds every key it can and lists the rest
+ * in the frame's `missing` (liquidity_usd, quote.usd, quote.observed_at).
+ */
+export interface RhcDexTradeEvent {
+  chain: "robinhood";
+  token_address: string;
+  token_symbol: string | null;
+  action: "buy" | "sell";
+  dex: string;
+  pool: string;
+  eth_amount: number | null;
+  price_usd: number | null;
+  mc_usd: number | null;
+  /** Pool TVL at broadcast (null = not yet tracked, never "zero"). */
+  liquidity_usd: number | null;
+  trader: string | null;
+  tx_hash: string;
+  log_index: number;
+  block_number: number;
+  traded_at: string;
+  amount_in_raw: string | null;
+  amount_out_raw: string | null;
+  token_amount_raw: string | null;
+  quote_amount_raw: string | null;
+  token: RhcSideIdentity;
+  quote: RhcSideIdentity & { usd: number | null; observed_at: string | null };
+  token_decimals: number | null;
+  quote_decimals: number | null;
+  metadata_status: RhcMetadataStatus;
+  price_status: RhcPriceStatus;
+  price_source: RhcPriceSource | null;
+  /** ISO block time of the print the price was observed at; null when unpriced. */
+  price_observed_at: string | null;
+  mc_status: RhcMcStatus | null;
+  /** `action` when a canonical quote (WETH / ETH / USDG / VIRTUAL or an equity quote) defines "the token", else null. */
+  side: "buy" | "sell" | null;
+  side_reason: RhcSideReason | null;
+  launchpad: string | null;
+}
+
+/** `rhc:dex_trade_unattributed` frame `data` (channel `rhc:dex_trades_unattributed`, ULTRA+). Raw legs plus per-leg identity; never a buy/sell side. */
+export interface RhcDexTradeUnattributedEvent {
+  chain: "robinhood";
+  dex: string;
+  pool: string;
+  token_in: string;
+  token_out: string;
+  amount_in: string | number | null;
+  amount_out: string | number | null;
+  liquidity_usd: number | null;
+  trader: string | null;
+  tx_hash: string;
+  log_index: number;
+  block_number: number;
+  traded_at: string;
+  amount_in_raw: string | null;
+  amount_out_raw: string | null;
+  token_in_meta: RhcSideIdentity;
+  token_out_meta: RhcSideIdentity;
+  metadata_status: RhcMetadataStatus;
+  price_status: "none";
+  price_source: null;
+  price_observed_at: null;
+  side: null;
+  side_reason: RhcSideReason;
+}
+
+/** Why a tick is not `fresh`. Every rule reuses a server-side pricing guard; none is client-tunable. */
+export type RhcTickQualityReason =
+  | "no_price"             // unpriced print / row
+  | "dust_trade"           // < 0.0005 ETH — the canonical price row ignores it
+  | "curve_live"           // AMM print within 5 min of a bonding-curve print for the same token
+  | "state_quote_fallback" // priced through the v4 pool-state fallback
+  | "low_liquidity"        // the liquidity-ratio gate nulled the MC
+  | "price_age"            // older than the 15-min stale line
+  | "mc_ceiling";          // MC at or above the $1B backstop
+
+/**
+ * `rhc:token_price` frame `data` (channel `rhc:token_prices`, PRO+, address-
+ * scoped). On subscribe every address first gets ONE frame with
+ * `snapshot: true` (the current price row; `source: "rhc_token_prices"`), then
+ * ticks derived from the RHC trade feed (`source: "rhc-dex-stream:trade"`),
+ * at most one per address per 250 ms with the latest value. A `stale` or
+ * `unreliable` price is only ever delivered with its flag — treat `quality`
+ * as part of the price. State stream: no `seq` / `id`, not replayed; a resume
+ * sends a fresh snapshot.
+ */
+export interface RhcTokenPriceTick {
+  chain: "robinhood";
+  address: string;
+  symbol: string | null;
+  price_usd: number | null;
+  /** ETH-denominated price; present on snapshots, null on trade-derived ticks. */
+  price_native: number | null;
+  market_cap_usd: number | null;
+  liquidity_usd: number | null;
+  source_pool: string | null;
+  source_dex: string | null;
+  /** ISO block time of the print (tick) or the last trade (snapshot). */
+  observed_at: string | null;
+  /** Age of `observed_at` when the frame was built (ms). */
+  price_age_ms: number | null;
+  quality: "fresh" | "stale" | "unreliable";
+  quality_reason: RhcTickQualityReason | null;
+  price_source: RhcPriceSource | null;
+  /** The print this tick came from; null on a snapshot. */
+  tx_hash: string | null;
+  log_index: number | null;
+  block_number: number | null;
+  source: "rhc_token_prices" | "rhc-dex-stream:trade";
+}
+
 export interface RhcPriceAlertEventsResponse {
   chain: Chain;
   events: RhcPriceAlertEvent[];

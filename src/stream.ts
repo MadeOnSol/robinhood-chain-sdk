@@ -10,9 +10,12 @@
  *
  * Channels are RHC-scoped: `rhc:kol_trades` (the KOL tape), `rhc:dex_trades`
  * (the full DEX firehose, ULTRA+) plus `rhc:dex_trades_unattributed` and
- * `rhc:new_tokens` (ULTRA+), `rhc:token_locks`, and the four rule-engine
- * channels (`rhc:copytrade:signals`, `rhc:price_alert:events` — event-driven
- * off each RHC trade, with table polls as a safety net — `rhc:kol:coordination`,
+ * `rhc:new_tokens` (ULTRA+), `rhc:token_locks`, `rhc:token_prices` (address-
+ * scoped: subscribe with `filters.addresses`, get one `snapshot: true` frame per
+ * address then coalesced ticks, each with `quality` fresh | stale | unreliable
+ * — see `RhcTokenPriceTick`), and the four rule-engine channels
+ * (`rhc:copytrade:signals`, `rhc:price_alert:events` — event-driven off each
+ * RHC trade, with table polls as a safety net — `rhc:kol:coordination`,
  * `rhc:kol:first_touches`). Same wire protocol as the Solana stream client.
  *
  * Recovery (v1 resume): the client remembers a cursor `{instance, seq, ts}` —
@@ -41,6 +44,7 @@ export type StreamChannel =
   | "rhc:kol:coordination"        // your coordination-rule fires — PRO+, user-scoped
   | "rhc:kol:first_touches"       // first tracked-KOL buy per token — PRO+, broadcast
   | "rhc:token_locks"             // a token lock / vesting contract created on chain — PRO+
+  | "rhc:token_prices"            // per-token price ticks for filters.addresses (snapshot, then ≤1 tick / address / 250 ms, with quality) — PRO+, address-scoped
   /**
    * @deprecated `rhc:trades` was never a real server channel — 0.4.0 subscribers
    * got a `channels_rejected` warning and silence. The server now accepts it as
@@ -60,6 +64,7 @@ export const STREAM_CHANNELS: readonly StreamChannel[] = [
   "rhc:kol:coordination",
   "rhc:kol:first_touches",
   "rhc:token_locks",
+  "rhc:token_prices",
 ];
 
 /** Event names delivered on those channels. */
@@ -73,7 +78,8 @@ export type StreamEventName =
   | "rhc:price_alert:recovery"    // on rhc:price_alert:events
   | "rhc:kol:coordination"        // on rhc:kol:coordination
   | "rhc:kol:first_touch"         // on rhc:kol:first_touches
-  | "rhc:token_lock";             // on rhc:token_locks
+  | "rhc:token_lock"              // on rhc:token_locks
+  | "rhc:token_price";            // on rhc:token_prices (frame.snapshot === true for the per-address snapshot sent on subscribe)
 
 /** Minimal stream-token shape the client needs (token + ws_url). */
 export interface StreamTokenLike {
