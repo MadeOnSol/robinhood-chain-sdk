@@ -586,13 +586,13 @@ export type RhcTokenLockLifecycleEventName = "rhc:token_unlock_upcoming" | "rhc:
 export interface RhcTokenLockLifecycleFilters {
   lifecycle: true;
   events?: RhcTokenLockLifecycleEventName[];
-  unlock_kinds?: Array<"cliff" | "period" | "final" | "tranche">;
+  unlock_kinds?: Array<"cliff" | "final" | "tranche">; // "period" is Solana-only; refused on an RHC-only subscription
   /** Token scope for creates AND lifecycle (≤ 500); applied only with `lifecycle: true`. */
   addresses?: string[];
 }
 
 /**
- * `rhc:token_unlock_upcoming` (an unlock within the next 24 h) /
+ * `rhc:token_unlock_upcoming` (the lock's NEXT unlock, when it is within 24 h) /
  * `rhc:token_unlock_available` (passed within the last 30 min — claimable PER
  * THE SCHEDULE, NOT claimed). Frame id = `<event>:<event_key>`.
  */
@@ -633,7 +633,7 @@ export interface RhcLpEventsResponse {
   /** Honesty block: the actions this response covers (["remove"] by default), adds_persisted, note, since. */
   coverage: {
     events: string[];
-    adds_persisted: boolean;
+    adds_persisted: boolean | null; // null when the probe failed
     adds_retention_days?: number;
     note: string;
     since: string;
