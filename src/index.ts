@@ -633,7 +633,7 @@ export interface RhcLpEventsResponse {
   /** Honesty block: the actions this response covers (["remove"] by default), adds_persisted, note, since. */
   coverage: {
     events: string[];
-    adds_persisted: boolean | null; // null when the probe failed
+    adds_persisted: boolean | null /* null when the probe failed */;
     adds_retention_days?: number;
     note: string;
     since: string;
