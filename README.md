@@ -585,7 +585,7 @@ await client.kol.firstTouchSubscriptions.update(subscription.id, { filters: {} }
 
 ## Streaming — `client.stream` (PRO+)
 
-Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Eleven RHC channels:
+Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Fourteen RHC channels:
 
 | Channel | Emits | Tier | Scope |
 |---|---|---|---|
@@ -600,6 +600,9 @@ Managed WebSocket with token fetch on every (re)connect, auto-reconnect with bac
 | `rhc:token_locks` | `rhc:token_lock` (+ `rhc:token_unlock_upcoming`, `rhc:token_unlock_available` with `filters.lifecycle: true`) | PRO+ | broadcast — a token lock / vesting contract created on chain; opt-in unlock-schedule events (claims / cancels are not observable on RHC) |
 | `rhc:token_prices` | `rhc:token_price` | PRO+ | **address-scoped** — `filters.addresses` required (25 / 100 / 250 per connection); one `snapshot: true` frame per address, then ≤ 1 tick per address per 250 ms with `quality` fresh / stale / unreliable + reason (`RhcTokenPriceTick`); no `seq` / `id` |
 | `rhc:lp_events` | `rhc:lp_event` | **ULTRA+** | broadcast — liquidity `add` / `remove` / `pool_created` on tracked Uniswap v2/v3/v4 pools with `in_range`, `active_share`, `share_of_reserves`, `material` (`RhcLpStreamEvent`); filters `RhcLpEventsFilters`; durable resume |
+| `rhc:token_candles` | `rhc:candle_closed`, `rhc:candle_revised` (+ `rhc:candle_update` with `filters.updates: true`) | PRO+ | scoped — live 1-minute candles for `filters.addresses` (`RhcCandleClosedEvent` / `RhcCandleUpdateEvent`); durable resume |
+| `rhc:token_risk` | `rhc:risk_verdict_changed` (+ `rhc:risk_verdict` snapshot) | PRO+ | scoped — risk-verdict changes for `filters.addresses` (`RhcRiskVerdictChangedEvent`); score HIGHER = SAFER |
+| `rhc:wallet_scores` | `rhc:deployer_tier_changed` | PRO+ | scoped — deployer tier changes for `filters.wallets` (0x deployers, `RhcDeployerTierChangedEvent`) |
 
 **Liquidity events and lock schedule (server 2026-09-23).** `rhc:lp_events` frames carry raw `amount0` / `amount1` strings (null on v4), the position range and, for v3/v4, `in_range` / `active_liquidity_delta` / `active_share` — a share of liquidity at the current price, not of TVL (an out-of-range removal is `active_share: 0`); v2 carries `share_of_reserves`; `material: true` = a removal of ≥ 25 %. When the pool's tick was not known the active fields are `null` with `active_share_reason: "pool_state_unknown"` — never guessed. `provider` is usually the router / position manager. No USD field. On `rhc:token_locks`, `filters.lifecycle: true` adds `rhc:token_unlock_upcoming` (within 24 h) and `rhc:token_unlock_available` (passed within 30 min — **claimable per the schedule, not claimed**; `withdrawals_tracked: false`).
 
@@ -607,6 +610,18 @@ Managed WebSocket with token fetch on every (re)connect, auto-reconnect with bac
 const lp = client.stream.connect();
 lp.subscribe({ subId: "rugs", channels: ["rhc:lp_events"], filters: { actions: ["remove"], material_only: true } });
 lp.on("rhc:lp_event", (e: RhcLpStreamEvent) => console.log(e.dex, e.pool, e.action, e.active_share ?? e.share_of_reserves));
+```
+
+**Candles, risk verdicts and deployer tiers (server 2026-09-23).** All three are PRO+ and **scoped**: per-connection cap PRO 25 / ULTRA 100 / BUSINESS 250 across named subscriptions; over the cap or without a scope the channel is rejected, never truncated. `rhc:token_candles` (`filters.addresses`, a budget separate from `rhc:token_prices`): `rhc:candle_closed` is the stored 1-minute row (id `candle:robinhood:<address>:<bucket epoch s>`), `rhc:candle_revised` the same row rewritten (`revision` n > 0, id suffix `:r<n>`); `filters.updates: true` adds `rhc:candle_update`, the in-progress minute (≤ 1 per address per second, a state stream: no id, never replayed, no snapshot). `rhc:token_risk` (`filters.addresses`, optional `risk_events`, `risk_snapshot` default `true`): `rhc:risk_verdict_changed` when a sweep recheck stores a different verdict — the change happened somewhere in `(previous_checked_at, checked_at]` — plus one `rhc:risk_verdict` snapshot frame per address (`frame.snapshot === true`); `score` is **higher = safer**, the opposite of Solana's `risk_score`. `rhc:wallet_scores` (`filters.wallets`, 0x deployers, optional `score_events`): `rhc:deployer_tier_changed` after each 5-min refresh ("recomputed at T", not "changed at T").
+
+```ts
+const s = client.stream.connect();
+s.subscribe({ subId: "candles", channels: ["rhc:token_candles"], filters: { addresses: [TOKEN], updates: true } });
+s.subscribe({ subId: "risk", channels: ["rhc:token_risk"], filters: { addresses: [TOKEN] } });
+s.subscribe({ subId: "tiers", channels: ["rhc:wallet_scores"], filters: { wallets: [DEPLOYER] } });
+s.on("rhc:candle_closed", (c: RhcCandleClosedEvent) => console.log(c.bucket_start, c.open_price_usd, c.close_price_usd, c.volume_usd));
+s.on("rhc:risk_verdict_changed", (e: RhcRiskVerdictChangedEvent) => console.log(e.token_address, e.changed, e.before.score, "→", e.after.score));
+s.on("rhc:deployer_tier_changed", (e: RhcDeployerTierChangedEvent) => console.log(e.address, e.tier_before, "→", e.tier_after));
 ```
 
 > **Deprecated:** `rhc:trades` was never a real channel — 0.4.0 subscribers got a `channels_rejected` warning and silence. The server now accepts it as an alias of `rhc:dex_trades` (and acks it under the canonical name), and the SDK keeps the literal marked `@deprecated` so 0.4.0 code compiles. Use `rhc:dex_trades`.

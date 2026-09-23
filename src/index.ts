@@ -623,6 +623,206 @@ export interface RhcTokenUnlockScheduleEvent {
   withdrawals_tracked: false;
 }
 
+/* ── WS Phase 4 (2026-09-23): live candles, risk verdicts, deployer tiers ── */
+
+/**
+ * `rhc:token_candles` subscribe filters (PRO+). `addresses` is REQUIRED (0x,
+ * case-insensitive) and capped per CONNECTION across named subscriptions —
+ * PRO 25 / ULTRA 100 / BUSINESS 250, a budget separate from
+ * `rhc:token_prices`. Over the cap, a missing scope or a non-boolean
+ * `updates` rejects the channel, never truncates.
+ */
+export interface RhcTokenCandlesFilters {
+  addresses: string[];
+  /** Also receive the in-progress minute as `rhc:candle_update` (a state stream). Default false. */
+  updates?: boolean;
+}
+
+/**
+ * `rhc:candle_closed` / `rhc:candle_revised` frame `data` — the STORED
+ * 1-minute row (`rhc_ohlc_1m`), identical live and on a durable resume.
+ * Every key is always present (null when unknown). Frame id =
+ * `candle:robinhood:<address>:<bucket_start epoch s>`, plus `:r<n>` for the
+ * n-th revision (not event-prefixed). `revision` 0 = the close as first
+ * written; a rewrite (restart merge, spoofed-pool purge) bumps it and is
+ * announced as `rhc:candle_revised` with the full rewritten row.
+ */
+export interface RhcCandleClosedEvent {
+  chain:               Chain;
+  address:             string;
+  bucket_start:        string;
+  /** bucket_start + 60 s. */
+  bucket_end:          string;
+  /** When the row was first written. */
+  closed_at:           string | null;
+  revision:            number;
+  /** Latest rewrite; null for revision 0. */
+  revised_at:          string | null;
+  open_price_usd:      number | null;
+  high_price_usd:      number | null;
+  low_price_usd:       number | null;
+  close_price_usd:     number | null;
+  open_mc_usd:         number | null;
+  high_mc_usd:         number | null;
+  low_mc_usd:          number | null;
+  close_mc_usd:        number | null;
+  close_liquidity_usd: number | null;
+  close_supply:        number | null;
+  volume_usd:          number | null;
+  buy_volume_usd:      number | null;
+  sell_volume_usd:     number | null;
+  trades:              number | null;
+  buy_count:           number | null;
+  sell_count:          number | null;
+  dex:                 string | null;
+  pool_address:        string | null;
+  final:               true;
+  source:              "rhc_ohlc_1m";
+}
+
+/**
+ * `rhc:candle_update` frame `data` (only with `filters.updates: true`) — the
+ * producer's in-progress minute, ≤ 1 per address per second. A state stream:
+ * no id / seq, never replayed, no snapshot on subscribe.
+ */
+export interface RhcCandleUpdateEvent {
+  chain:           Chain;
+  address:         string;
+  bucket_start:    string;
+  bucket_end:      string;
+  open_price_usd:  number | null;
+  high_price_usd:  number | null;
+  low_price_usd:   number | null;
+  close_price_usd: number | null;
+  close_mc_usd:    number | null;
+  volume_usd:      number | null;
+  trades:          number | null;
+  final:           false;
+  /** The producer's timestamp of this state (ISO). */
+  as_of:           string | null;
+  source:          "rhc-dex-stream:open_candle";
+}
+
+/**
+ * `rhc:token_risk` subscribe filters (PRO+). `addresses` is REQUIRED (0x,
+ * lowercased), capped per connection PRO 25 / ULTRA 100 / BUSINESS 250.
+ */
+export interface RhcTokenRiskFilters {
+  addresses: string[];
+  /** Non-empty subset of the channel's event types. */
+  risk_events?: Array<"rhc:risk_verdict_changed">;
+  /** Send one `rhc:risk_verdict` snapshot per address on subscribe / scope change / resume. Default true. */
+  risk_snapshot?: boolean;
+}
+
+/** A stored RHC risk verdict (event `before` / `after`, snapshot `verdict`). */
+export interface RhcRiskVerdict {
+  /** 100 − penalties: HIGHER = SAFER — the opposite of Solana's `risk_score`; never compare the two. */
+  score:           number | null;
+  sellable:        boolean | null;
+  sellable_reason: string | null;
+  proxy_kind:      string | null;
+  upgradeable:     boolean | null;
+  owner_model:     string | null;
+  can_mint:        boolean | null;
+  can_pause:       boolean | null;
+  lp_custody:      string | null;
+  lp_burned_pct:   number | null;
+  code_size:       number | null;
+  flags:           string[];
+}
+
+/**
+ * `rhc:risk_verdict_changed` — a sweep recheck stored a verdict that differs
+ * in a diffed field. The change happened somewhere in
+ * `(previous_checked_at, checked_at]` (days to weeks), never at `checked_at`.
+ * A first assessment is never an event. Frame id =
+ * `rhc:risk_verdict_changed:<event_key>`.
+ */
+export interface RhcRiskVerdictChangedEvent {
+  chain:               Chain;
+  token_address:       string;
+  /** `<token>:verdict:<checked_at epoch ms>`. */
+  event_key:           string;
+  changed:             Array<"score" | "sellable" | "proxy_kind" | "upgradeable" | "owner_model" | "can_mint" | "can_pause" | "lp_custody" | "flags">;
+  flags_added:         string[];
+  flags_removed:       string[];
+  before:              RhcRiskVerdict;
+  after:               RhcRiskVerdict;
+  checked_at:          string;
+  previous_checked_at: string | null;
+  score_semantics:     "higher_is_safer";
+  detection: {
+    method:                 "recheck_sweep";
+    recheck_target_hours:   number;
+    sweep_interval_minutes: number;
+    min_liquidity_usd:      number;
+    note:                   string;
+  };
+  written_at: string;
+  source:     "rhc_token_risk";
+}
+
+/**
+ * `rhc:risk_verdict` snapshot frame `data` (frame `snapshot: true`, no id /
+ * seq): the CURRENT stored verdict of one scoped address.
+ */
+export interface RhcRiskVerdictSnapshot {
+  chain:           Chain;
+  token_address:   string;
+  /** false = never assessed (verdict and checked_at null). */
+  assessed:        boolean;
+  verdict:         RhcRiskVerdict | null;
+  checked_at:      string | null;
+  score_semantics: "higher_is_safer";
+  source:          "rhc_token_risk";
+}
+
+/**
+ * `rhc:wallet_scores` subscribe filters (PRO+). `wallets` is REQUIRED — 0x
+ * deployer addresses (lowercased) — capped per connection PRO 25 / ULTRA 100 /
+ * BUSINESS 250. A subscription that also holds the Solana `wallet:scores`
+ * channel may mix in base58 wallets; an entry of a chain the subscription does
+ * not hold is refused.
+ */
+export interface RhcWalletScoresFilters {
+  wallets: string[];
+  /** Optional subset of the held channels' event types. */
+  score_events?: Array<"rhc:deployer_tier_changed" | "deployer:tier_changed" | "kol:score_state_changed">;
+}
+
+/**
+ * `rhc:deployer_tier_changed` — the 5-min `mv_rhc_deployers` refresh found a
+ * different tier ("recomputed at T", not "changed at T"). A deployer appearing
+ * `neutral` is not an event; entering a ranked tier is (`tier_before:
+ * "neutral"`), a first appearance already ranked has `tier_before: null` +
+ * `first_appearance: true`, vanishing from the matview has `tier_after: null`.
+ * Frame id = `rhc:deployer_tier_changed:<event_key>`.
+ */
+export interface RhcDeployerTierChangedEvent {
+  /** `<address>:<refresh epoch ms>`. */
+  event_key:        string;
+  chain:            Chain;
+  address:          string;
+  tier_before:      DeployerTier | null;
+  tier_after:       DeployerTier | null;
+  first_appearance: boolean;
+  /** null when the deployer left the matview. */
+  stats: {
+    tokens_deployed:  number | null;
+    graduated:        number | null;
+    graduation_rate:  number | null;
+    runners:          number | null;
+    runner_rate:      number | null;
+    best_peak_mc_usd: number | null;
+    first_deploy_at:  string | null;
+    last_deploy_at:   string | null;
+  } | null;
+  computed_at: string;
+  source:      "matview_refresh";
+  matview:     "mv_rhc_deployers";
+}
+
 export interface RhcLpEventsResponse {
   chain: Chain;
   events: RhcLpEvent[];
