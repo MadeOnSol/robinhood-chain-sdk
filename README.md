@@ -251,8 +251,10 @@ const { events, has_more, next_before, coverage } = await client.lpEvents({ toke
 for (const ev of events) {
   if (ev.provider_is_token_deployer) console.warn("deployer pulled liquidity:", ev.tx_hash, ev.dex, ev.token_amount_raw);
 }
-console.log(coverage.adds_persisted); // false — always
+console.log(coverage.events); // ["remove"] — the default request is removals only
 ```
+
+Since 2026-09-23 `action: "add" | "pool_created" | "all"` opts into liquidity adds (kept 7 days) and pool creations, and every row carries the depth fields `tick_lower` / `tick_upper`, `liquidity_delta`, `in_range`, `active_liquidity_delta`, `active_share` (v3/v4), `share_of_reserves` (v2) and `material` — null where the pool state was unknown and on older rows.
 
 > **Removals ONLY.** Liquidity adds are not persisted (v4 adds share the topic and are dropped at decode; v2/v3 `Mint` is not subscribed), so every row is `event: "remove"` and an empty page means "no removals seen", never "no liquidity activity" — the `coverage` block spells this out. Amounts are **raw uint256 decimal strings** (`liquidity`, `amount0` / `amount1`, plus pre-resolved `token_amount_raw` / `quote_token` / `quote_amount_raw`) — do not `Number()` them; v4 rows carry `liquidity` only because the pool manager emits no token amounts. Filters: `token`, `pool` (v2/v3 address or v4 bytes32 poolId), `provider`, `dex`. Data since 2026-08-05.
 
@@ -583,7 +585,7 @@ await client.kol.firstTouchSubscriptions.update(subscription.id, { filters: {} }
 
 ## Streaming — `client.stream` (PRO+)
 
-Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Nine RHC channels:
+Managed WebSocket with token fetch on every (re)connect, auto-reconnect with backoff, heartbeat liveness, and typed events. Stream tokens **never expire** (since 2026-08-27) — there is no refresh timer; `client.stream.getToken()` returns the same token every call (`expires_at` / `next_refresh_at` are always `null`), and `getToken({ rotate: true })` replaces it (the old one keeps working for 60 s). Eleven RHC channels:
 
 | Channel | Emits | Tier | Scope |
 |---|---|---|---|
@@ -595,8 +597,17 @@ Managed WebSocket with token fetch on every (re)connect, auto-reconnect with bac
 | `rhc:price_alert:events` | `rhc:price_alert:dip`, `rhc:price_alert:recovery` | PRO+ | user-scoped; event-driven off each trade (a few seconds), not sub-second |
 | `rhc:kol:coordination` | `rhc:kol:coordination` | PRO+ | user-scoped — only **your** rules' fires |
 | `rhc:kol:first_touches` | `rhc:kol:first_touch` | PRO+ | broadcast — ULTRA gates only the first-touch *subscription CRUD*, not this channel |
-| `rhc:token_locks` | `rhc:token_lock` | PRO+ | broadcast — a token lock / vesting contract created on chain |
+| `rhc:token_locks` | `rhc:token_lock` (+ `rhc:token_unlock_upcoming`, `rhc:token_unlock_available` with `filters.lifecycle: true`) | PRO+ | broadcast — a token lock / vesting contract created on chain; opt-in unlock-schedule events (claims / cancels are not observable on RHC) |
 | `rhc:token_prices` | `rhc:token_price` | PRO+ | **address-scoped** — `filters.addresses` required (25 / 100 / 250 per connection); one `snapshot: true` frame per address, then ≤ 1 tick per address per 250 ms with `quality` fresh / stale / unreliable + reason (`RhcTokenPriceTick`); no `seq` / `id` |
+| `rhc:lp_events` | `rhc:lp_event` | **ULTRA+** | broadcast — liquidity `add` / `remove` / `pool_created` on tracked Uniswap v2/v3/v4 pools with `in_range`, `active_share`, `share_of_reserves`, `material` (`RhcLpStreamEvent`); filters `RhcLpEventsFilters`; durable resume |
+
+**Liquidity events and lock schedule (server 2026-09-23).** `rhc:lp_events` frames carry raw `amount0` / `amount1` strings (null on v4), the position range and, for v3/v4, `in_range` / `active_liquidity_delta` / `active_share` — a share of liquidity at the current price, not of TVL (an out-of-range removal is `active_share: 0`); v2 carries `share_of_reserves`; `material: true` = a removal of ≥ 25 %. When the pool's tick was not known the active fields are `null` with `active_share_reason: "pool_state_unknown"` — never guessed. `provider` is usually the router / position manager. No USD field. On `rhc:token_locks`, `filters.lifecycle: true` adds `rhc:token_unlock_upcoming` (within 24 h) and `rhc:token_unlock_available` (passed within 30 min — **claimable per the schedule, not claimed**; `withdrawals_tracked: false`).
+
+```ts
+const lp = client.stream.connect();
+lp.subscribe({ subId: "rugs", channels: ["rhc:lp_events"], filters: { actions: ["remove"], material_only: true } });
+lp.on("rhc:lp_event", (e: RhcLpStreamEvent) => console.log(e.dex, e.pool, e.action, e.active_share ?? e.share_of_reserves));
+```
 
 > **Deprecated:** `rhc:trades` was never a real channel — 0.4.0 subscribers got a `channels_rejected` warning and silence. The server now accepts it as an alias of `rhc:dex_trades` (and acks it under the canonical name), and the SDK keeps the literal marked `@deprecated` so 0.4.0 code compiles. Use `rhc:dex_trades`.
 

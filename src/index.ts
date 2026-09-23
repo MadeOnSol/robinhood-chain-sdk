@@ -455,18 +455,28 @@ export interface RhcLpEventsParams {
   provider?: string;
   /** Filter by DEX version. */
   dex?: UniswapVersion;
+  /**
+   * Which actions to return (2026-09-23). Default `"remove"` = the historical
+   * removals-only feed, unchanged. `"add"` (kept 7 days), `"pool_created"` or
+   * `"all"` opt into rows persisted since the WS Phase 3 producer.
+   */
+  action?: RhcLpAction | "all";
   /** Opaque cursor from `next_before` (same (block_time,id) keyset as /rhc/trades). */
   before?: string;
 }
 
+/** A liquidity action on Robinhood Chain. */
+export type RhcLpAction = "add" | "remove" | "pool_created";
+
 /**
- * One liquidity REMOVAL from `/rhc/lp-events`. Every row is `event: "remove"` —
- * adds are not persisted. Amounts are raw on-chain uint256 integers as decimal
- * STRINGS; v4 rows carry `liquidity` only (the pool manager emits no token
- * amounts), so `amount0` / `amount1` / `token_amount_raw` are null there.
+ * One liquidity event from `/rhc/lp-events`. Without `action` every row is
+ * `event: "remove"` (the default feed is removals only). Amounts are raw
+ * on-chain uint256 integers as decimal STRINGS; v4 rows carry `liquidity` only
+ * (the pool manager emits no token amounts), so `amount0` / `amount1` /
+ * `token_amount_raw` are null there.
  */
 export interface RhcLpEvent {
-  event: "remove";
+  event: RhcLpAction;
   pool: string;
   dex: UniswapVersion;
   fee_tier: number | null;
@@ -498,6 +508,119 @@ export interface RhcLpEvent {
   block_time: string;
   tx_hash: string;
   log_index: number;
+  /* Depth fields (2026-09-23) — null where the pool state was unknown and on older rows. */
+  tick_lower?: number | null;
+  tick_upper?: number | null;
+  /** Signed liquidity change (v3/v4), int256 as string. */
+  liquidity_delta?: string | null;
+  /** tick_lower <= current tick < tick_upper just before the event; null = tick unknown. */
+  in_range?: boolean | null;
+  /** liquidity_delta when in range, "0" out of range. */
+  active_liquidity_delta?: string | null;
+  /** |active delta| / active liquidity before (v3/v4); 0 out of range; adds can exceed 1. */
+  active_share?: number | null;
+  /** v2 only: amount / reserve before (from the pair's Sync). */
+  share_of_reserves?: number | null;
+  /** true = a removal of ≥ 25 % of reserves / active liquidity; null for adds, creations and unknown shares. */
+  material?: boolean | null;
+}
+
+/** Why `active_share` is null / not the relevant share. */
+export type RhcLpActiveShareReason = "pool_created" | "not_concentrated" | "pool_state_unknown" | "no_active_liquidity";
+
+/**
+ * `rhc:lp_event` frame `data` (WS channel `rhc:lp_events`, ULTRA / BUSINESS,
+ * 2026-09-23). Frame id = `rhc:lp_event:<tx_hash>:<log_index>`. Every key is
+ * always present (null when unknown). `in_range` / `active_*` are null with
+ * `active_share_reason: "pool_state_unknown"` when the pool's tick was not
+ * known — never guessed. `provider` is usually a router / position manager,
+ * not the beneficial owner. No USD field.
+ */
+export interface RhcLpStreamEvent {
+  chain: Chain;
+  action: RhcLpAction;
+  dex: UniswapVersion;
+  pool: string;
+  token_address: string | null;
+  token: { address: string | null; symbol: string | null; decimals: number | null };
+  token0: string | null;
+  token1: string | null;
+  provider: string | null;
+  liquidity: string | null;
+  /** NULL on v4 — ModifyLiquidity reports no token amounts. */
+  amount0: string | null;
+  amount1: string | null;
+  tick_lower: number | null;
+  tick_upper: number | null;
+  liquidity_delta: string | null;
+  in_range: boolean | null;
+  active_liquidity_delta: string | null;
+  active_share: number | null;
+  active_share_reason: RhcLpActiveShareReason | null;
+  share_of_reserves: number | null;
+  material: boolean | null;
+  block_number: number | null;
+  block_time: string | null;
+  tx_hash: string;
+  log_index: number | null;
+}
+
+/** Per-subscription filters for `rhc:lp_events` (all optional, AND; invalid values reject the channel). */
+export interface RhcLpEventsFilters {
+  addresses?: string[];
+  pools?: string[];
+  dexes?: UniswapVersion[];
+  actions?: RhcLpAction[];
+  material_only?: boolean;
+  /** 0..1000 — only events whose relevant share (reserves on v2, active on v3/v4) is known and ≥ this. */
+  min_share?: number;
+}
+
+/** Unlock-schedule event names on `rhc:token_locks` (only with `filters.lifecycle: true`). */
+export type RhcTokenLockLifecycleEventName = "rhc:token_unlock_upcoming" | "rhc:token_unlock_available";
+
+/**
+ * Filters that switch `rhc:token_locks` to lifecycle mode. Claims, extensions
+ * and cancels are NOT observable on Robinhood Chain — only the unlock schedule.
+ */
+export interface RhcTokenLockLifecycleFilters {
+  lifecycle: true;
+  events?: RhcTokenLockLifecycleEventName[];
+  unlock_kinds?: Array<"cliff" | "final" | "tranche">; // "period" is Solana-only; refused on an RHC-only subscription
+  /** Token scope for creates AND lifecycle (≤ 500); applied only with `lifecycle: true`. */
+  addresses?: string[];
+}
+
+/**
+ * `rhc:token_unlock_upcoming` (the lock's NEXT unlock, when it is within 24 h) /
+ * `rhc:token_unlock_available` (passed within the last 30 min — claimable PER
+ * THE SCHEDULE, NOT claimed). Frame id = `<event>:<event_key>`.
+ */
+export interface RhcTokenUnlockScheduleEvent {
+  event_key: string;
+  lock_id: string;
+  token_address: string;
+  family: string;
+  observed_at: string | null;
+  unlock_at: string;
+  unlock_kind: "cliff" | "final" | "tranche";
+  amount_raw: string | null;
+  amount_reason: string | null;
+  unlocked_total_raw: string | null;
+  release_model: "at_end" | "linear" | "tranched";
+  claimable?: true;
+  chain: Chain;
+  locker: string | null;
+  kind: string | null;
+  subject: string | null;
+  lp_kind: string | null;
+  lp_pool: string | null;
+  sender: string | null;
+  recipient: string | null;
+  locked_amount_raw: string | null;
+  amount_unit: string | null;
+  decimals: number | null;
+  withdrawals_tracked: false;
 }
 
 export interface RhcLpEventsResponse {
@@ -507,10 +630,11 @@ export interface RhcLpEventsResponse {
   has_more: boolean;
   /** Opaque pagination cursor; pass back as `before`. */
   next_before: string | null;
-  /** Honesty block: `events: ["remove"]`, `adds_persisted: false`, note, since. */
+  /** Honesty block: the actions this response covers (["remove"] by default), adds_persisted, note, since. */
   coverage: {
     events: string[];
-    adds_persisted: boolean;
+    adds_persisted: boolean | null /* null when the probe failed */;
+    adds_retention_days?: number;
     note: string;
     since: string;
   };
