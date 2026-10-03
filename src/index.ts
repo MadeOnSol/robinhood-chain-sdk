@@ -63,19 +63,53 @@ export type DeployerTier = "elite" | "good" | "neutral" | "spammer";
 /** Uniswap DEX version on Robinhood Chain. */
 export type UniswapVersion = "uniswap-v2" | "uniswap-v3" | "uniswap-v4";
 
+/** Free (BASIC) tier 5-minute delay metadata — present only on delayed feed responses. */
+export interface FreeTierDelayMeta {
+  /** e.g. "5m" */
+  delay?: string;
+  delay_seconds?: number;
+  /** The delayed cutoff the page was served at. */
+  as_of?: string;
+  delay_note?: string;
+  /** Pricing URL. */
+  upgrade?: string;
+}
+
+/** Present when a filter was applied after the candidate fetch. `scan_truncated: true` means more matches MAY exist past `next_cursor`. */
+export interface FeedScanInfo {
+  post_filtered: boolean;
+  scanned: number;
+  scan_truncated: boolean;
+  scan_budget: number;
+}
+
 // ─── KOL feed (/rhc/kol/feed) ────────────────────────────────────────────────
 
 export interface RhcKolFeedParams {
   /** Number of trades to return (1–100). Default: 50. */
   limit?: number;
-  /** Cursor — return trades strictly older than this ISO 8601 timestamp. Pass `next_before` from the previous response. */
+  /** LEGACY cursor — trades strictly older than this ISO 8601 timestamp (skips same-timestamp rows). Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (traded_at, id) keyset. Cannot be combined with `before`. */
+  cursor?: string;
   /** Filter by trade direction. */
   action?: TradeAction;
   /** Filter to a single KOL by their EVM wallet address (0x, 40 hex). */
   kol?: string;
   /** Minimum trade size in ETH. */
   min_eth?: number;
+  /** Exclude sell-side trades. */
+  exclude_sells?: boolean;
+  /** Minimum KOL win rate, 0–1 (closed positions only; unscored KOLs are dropped, so 0 is not a no-op). */
+  min_kol_winrate?: number;
+  /** Hold-time bucket (not Solana's strategy tag). */
+  strategy?: "scalper" | "day_trader" | "swing" | "inactive" | "unscored";
+  /** Max token age in minutes at trade time (1–43200). */
+  token_age_max_min?: number;
+  /** Lower bound on market cap at trade (USD). */
+  min_mc_usd?: number;
+  /** Upper bound on market cap at trade (USD). */
+  max_mc_usd?: number;
 }
 
 /** One KOL trade row from `/rhc/kol/feed`. */
@@ -116,14 +150,24 @@ export interface RhcKolFeedTrade {
   traded_at: string;
 }
 
-export interface RhcKolFeedResponse {
+export interface RhcKolFeedResponse extends FreeTierDelayMeta {
   chain: Chain;
   trades: RhcKolFeedTrade[];
   count: number;
+  /** Echo of the score filters. */
+  filtered_by?: { min_kol_winrate: number | null; strategy: string | null };
+  /** KOLs that passed the score filters; null when none were set. */
+  matched_kols?: number | null;
   /** Age of the newest row, seconds. */
-  data_age_seconds: number | null;
-  /** Cursor for the next page — pass as `before` to fetch older trades. */
+  data_age_seconds?: number | null;
+  /** LEGACY strict timestamp cursor — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end. */
+  next_cursor?: string | null;
+  /** false only when the candidate feed is exhausted. */
+  has_more?: boolean;
+  /** Present when a filter was applied after the candidate fetch. */
+  scan?: FeedScanInfo;
   _rid?: string;
 }
 
@@ -321,8 +365,10 @@ export interface RhcFirstTouchesParams {
   limit?: number;
   /** Only first-touches strictly newer than this ISO 8601 timestamp (poll forward). */
   since?: string;
-  /** Cursor — only first-touches strictly older than this ISO 8601 timestamp. Pass `next_before`. */
+  /** LEGACY cursor — only first-touches strictly older than this ISO 8601 timestamp. Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (first_buy_at, id) keyset. */
+  cursor?: string;
   /** Minimum first-buy size in ETH (0–100000). */
   min_eth?: number;
   /** Only tokens younger than N minutes at first touch (1–43200) — isolates genuinely early calls. */
@@ -364,12 +410,16 @@ export interface RhcFirstTouch {
   first_kol: RhcFirstTouchKol;
 }
 
-export interface RhcKolFirstTouchesResponse {
+export interface RhcKolFirstTouchesResponse extends FreeTierDelayMeta {
   chain: Chain;
   events: RhcFirstTouch[];
   count: number;
-  /** Cursor for the next page — pass as `before` to fetch older first-touches. */
+  /** LEGACY strict timestamp cursor — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end (or when the server cannot offer an exact cursor). */
+  next_cursor?: string | null;
+  /** Exact (limit+1 probe); null only when the server cannot determine it. */
+  has_more?: boolean | null;
   /** Age of the newest event, seconds. */
   data_age_seconds: number | null;
   _rid?: string;
@@ -954,23 +1004,58 @@ export interface RhcEquitiesResponse {
 
 // ─── Token snapshot (/rhc/tokens/{address}) ──────────────────────────────────
 
+/** Reputation fields are null while the deployer is not yet in the reputation view (`history_status: "pending"`) or the lookup failed (`"unavailable"`). */
 export interface RhcTokenDeployer {
   address: string;
-  tier: DeployerTier;
-  tokens_deployed: number;
+  tier: DeployerTier | null;
+  tokens_deployed: number | null;
   graduation_rate: number | null;
   runner_rate: number | null;
-  runners: number;
+  runners: number | null;
   best_peak_mc_usd: number | null;
-  launchpads: string[];
+  launchpads: string[] | null;
+  /** The creator is resolved from the token row. */
+  identity_status?: "known";
+  /** computed | pending (not in the reputation view yet) | unavailable (lookup failed — not the same as "new"). */
+  history_status?: "computed" | "pending" | "unavailable";
+}
+
+export interface RhcTokenKolParticipant {
+  kol_id: string;
+  name: string | null;
+  twitter_url: string | null;
+  buys: number;
+  sells: number;
+  last_trade_at: string | null;
 }
 
 export interface RhcTokenKolActivity {
   distinct_kols: number;
+  /** Up to 20 distinct KOL names. */
   names: string[];
   buys: number;
   sells: number;
   net_eth: number;
+  distinct_wallets?: number;
+  buy_eth?: number;
+  sell_eth?: number;
+  /** Up to 20 per-KOL rows. */
+  participants?: RhcTokenKolParticipant[];
+  /** Identity the counts are keyed on (e.g. "kol_wallet_id"). */
+  identity?: string;
+  /** all_time (exact aggregate) or latest_trades (fallback sample). */
+  window?: { kind: "all_time" | "latest_trades"; first_trade_at: string | null; last_trade_at: string | null };
+  /** "all_trades" or "latest_<N>_trades". */
+  basis?: string;
+  /** Fallback sample only. */
+  sample_size?: number;
+  /** false when a full fallback sample may have cut older trades. */
+  complete?: boolean;
+  /** Free-tier delay disclosure (only this block is delayed). */
+  delay?: string;
+  as_of?: string;
+  delay_note?: string;
+  upgrade?: string;
 }
 
 export interface RhcTokenSnapshot {
@@ -984,10 +1069,17 @@ export interface RhcTokenSnapshot {
   graduated_pool: string | null;
   graduated_at: string | null;
   deployer_address: string | null;
+  /** known | unresolved (no creator on the token row) | unavailable (token row not found). */
+  deployer_identity_status?: "known" | "unresolved" | "unavailable";
   first_seen_at: string | null;
   token_age_minutes: number | null;
   price_usd: number | null;
   price_native: number | null;
+  /** Time of the trade that set the price. */
+  price_observed_at?: string | null;
+  price_age_seconds?: number | null;
+  price_is_stale?: boolean;
+  price_updated_at?: string | null;
   market_cap_usd: number | null;
   fdv_usd: number | null;
   peak_mc_usd: number | null;
@@ -995,6 +1087,9 @@ export interface RhcTokenSnapshot {
   drawdown_from_peak_pct: number | null;
   total_supply_raw: string | null;
   liquidity_usd: number | null;
+  /** `v4_virtual_ceiling` = Uniswap v4 virtual-reserve ceiling, not measured TVL. */
+  liquidity_basis?: "v4_virtual_ceiling" | "measured";
+  liquidity_note?: string;
   primary_dex: string | null;
   primary_pool: string | null;
   last_trade_time: string | null;
@@ -1003,8 +1098,10 @@ export interface RhcTokenSnapshot {
   /** Up to 10 other tokens by the same deployer (symbol or address). */
   deployer_other_tokens: string[];
   kol_activity: RhcTokenKolActivity;
-  /** Up to 20 pools with reserves/liquidity/sqrt_price. */
+  /** Up to 20 pools with reserves/liquidity/sqrt_price (+ `liquidity_basis`). */
   pools: Array<Record<string, unknown>>;
+  /** Fields whose enrichment read failed (e.g. "deployer_other_tokens"). */
+  degraded_fields?: string[];
   _rid?: string;
 }
 
@@ -1089,7 +1186,7 @@ export interface RhcKolConsensusResponse {
 
 // ─── Buyer quality (/rhc/tokens/{address}/buyer-quality) ─────────────────────
 
-export type QualityConfidence = "low" | "medium" | "high";
+export type QualityConfidence = "low" | "medium" | "high" | "insufficient_data";
 export type QualitySignal = "positive" | "neutral" | "negative";
 
 export interface RhcBuyerQualityBreakdown {
@@ -1105,6 +1202,10 @@ export interface RhcBuyerQualityBreakdown {
   /** Percent (0–100), non-bot buyers with ≥3 tokens of history. */
   avg_historical_win_rate: number | null;
   bot_dominated: boolean;
+  /** Early buyers with any trading history. */
+  wallets_with_history?: number;
+  /** Buyers whose win rate fed the score (what `confidence` counts). */
+  qualified_win_rate_wallets?: number;
 }
 
 export interface RhcBuyerQuality {
@@ -1118,12 +1219,16 @@ export interface RhcBuyerQualityCoverage {
   bundle_detection: "available";
   dump_cluster_signal: "available";
   note?: string;
+  /** Pre-2026-07-18 launches: the cohort is the earliest ATTRIBUTED buyers. */
+  earliest_buyers_caveat?: string;
 }
 
 export interface RhcBuyerQualityResponse {
   chain: Chain;
   token_address: string;
   current_mc_usd: number | null;
+  /** distinct_first_buy (first 20 distinct buyer EOAs) or legacy_row_window. */
+  cohort_selection?: "distinct_first_buy" | "legacy_row_window";
   quality: RhcBuyerQuality;
   coverage?: RhcBuyerQualityCoverage;
   /** Present only when buyer data is insufficient. */
@@ -1858,8 +1963,10 @@ export interface RhcDeployerAlertsParams {
   offset?: number;
   /** Poll forward — only alerts with `event_at` strictly newer than this ISO 8601 timestamp. Pass `next_event_at`. */
   since?: string;
-  /** Page back — only alerts strictly older than this ISO 8601 timestamp. Pass `next_before`. Takes precedence over `offset`. */
+  /** LEGACY page back — only alerts strictly older than this ISO 8601 timestamp. Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (event_at, id) keyset. */
+  cursor?: string;
   /** Disables the default $100 liquidity gate and returns the raw tape. */
   include_untradeable?: boolean;
 }
@@ -1885,23 +1992,33 @@ export interface RhcDeployerAlert {
   mc_at_alert: number | null;
   current_mc_usd: number | null;
   liquidity_usd: number | null;
+  /** `v4_virtual_ceiling` = Uniswap v4 virtual-reserve ceiling, not measured TVL. */
+  liquidity_basis?: "v4_virtual_ceiling" | "measured";
   priority: RhcAlertPriority;
   is_active: boolean;
   created_at: string;
   event_at: string | null;
 }
 
-export interface RhcDeployerAlertsResponse {
+export interface RhcDeployerAlertsResponse extends FreeTierDelayMeta {
   chain: Chain;
   alerts: RhcDeployerAlert[];
   limit: number;
   offset: number;
   /** Echoes whether the default liquidity gate ran — `liquidity_usd >= $100` or `off (include_untradeable=true)`. */
   tradability_filter: string;
+  /** How to read `liquidity_basis`. */
+  liquidity_note?: string;
   /** Newest `event_at` on this page — pass back as `since` to poll forward. */
   next_event_at: string | null;
-  /** Oldest `event_at` on this page — pass as `before` to page back. */
+  /** LEGACY: event_at of the last row consumed — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end. */
+  next_cursor?: string | null;
+  /** false only when the candidate feed is exhausted. */
+  has_more?: boolean;
+  /** Present when a post-filter was applied. */
+  scan?: FeedScanInfo;
   /** Age of the newest alert, seconds. */
   data_age_seconds: number | null;
   _rid?: string;
@@ -2283,8 +2400,51 @@ export interface RhcTokenUnlocksResponse {
 }
 
 
-/** `GET /rhc/tokens/{address}/early-buyers` — first buyers of a token, ranked, with still-holding status. Untyped body (shape not yet pinned in the SDK). */
-export type RhcEarlyBuyersResponse = Record<string, unknown> & { _rid?: string };
+/** One ranked early buyer on `GET /rhc/tokens/{address}/early-buyers`. */
+export interface RhcEarlyBuyer {
+  rank: number;
+  wallet: string;
+  first_buy_at: string | null;
+  first_buy_block: number | null;
+  /** null when there is no holding data for the wallet. */
+  still_holding: boolean | null;
+  /** Raw token balance (decimal string) from the Transfer-log fold. */
+  balance: string | null;
+  position: "open" | "closed" | "unknown";
+  bought_eth: number | null;
+  sold_eth: number | null;
+  /** sold_eth − bought_eth; a profit only when position is "closed". */
+  realized_eth: number | null;
+  trades: number | null;
+  avg_entry_mc_usd: number | null;
+}
+
+/**
+ * `GET /rhc/tokens/{address}/early-buyers` — first buyers of a token, ranked, with
+ * still-holding status. An unranked token returns an empty list with
+ * `summary: null` and a `note` (ranks come from a daily sweep).
+ */
+export interface RhcEarlyBuyersResponse {
+  chain: Chain;
+  token_address: string;
+  early_buyers: RhcEarlyBuyer[];
+  count: number;
+  computed_at: string | null;
+  /** still_holding is exact only when this is true. */
+  holdings_verified: boolean | null;
+  summary: {
+    ranked: number;
+    with_holding_data: number;
+    still_holding: number;
+    exited: number;
+    closed_positions: number;
+    realized_eth_closed_only: number | null;
+  } | null;
+  source?: { method: string; note: string };
+  /** Present on the unranked answer. */
+  note?: string;
+  _rid?: string;
+}
 
 // ─── Wallet intelligence ─────────────────────────────────────────────────────
 //
@@ -3272,6 +3432,17 @@ export interface StreamToken {
   rotated?: boolean;
   /** Human-readable lifetime statement from the server (e.g. `"never expires"`). */
   lifetime?: string;
+  /** DEX firehose endpoint — present for ULTRA / BUSINESS / ENTERPRISE only. */
+  dex_ws_url?: string;
+  /** Connect instructions. */
+  usage?: string;
+  subscribe_example?: { type: "subscribe"; channels: string[] };
+  /** Every channel name the stream accepts. */
+  channels?: string[];
+  /** rhc:token_prices subscribe help (filters.addresses required; cap per tier). */
+  rhc_token_prices?: { subscribe_example: Record<string, unknown>; address_cap: number | null; coalesce_ms: number; note: string };
+  /** Named-subscription help (cap per connection by tier). */
+  named_subscriptions?: { subscribe_example: Record<string, unknown>; max_per_connection: number | null; note: string };
   [key: string]: unknown;
 }
 
