@@ -75,6 +75,17 @@ export interface FreeTierDelayMeta {
   upgrade?: string;
 }
 
+/**
+ * Interim attribution disclosure on wallet-level aggregates (alpha wallets,
+ * top traders, cohort flow): figures come from attributed trades only, and
+ * `trader_eoa` was written reliably only from 2026-07-18, so earlier history
+ * is not reflected. The server removes it once the backfill lands.
+ */
+export interface RhcAttributionNote {
+  attribution_complete_from: string;
+  note: string;
+}
+
 /** Present when a filter was applied after the candidate fetch. `scan_truncated: true` means more matches MAY exist past `next_cursor`. */
 export interface FeedScanInfo {
   post_filtered: boolean;
@@ -148,6 +159,18 @@ export interface RhcKolFeedTrade {
   tx_hash: string;
   block_number: number;
   traded_at: string;
+  /** The KOL's row in mv_rhc_kol_scores. `null` = no row yet (too few closed positions), never "not looked up". */
+  kol_score?: RhcKolFeedScore | null;
+}
+
+/** KOL score snapshot attached to each `/rhc/kol/feed` trade. */
+export interface RhcKolFeedScore {
+  /** 0–1, CLOSED positions only (sold ≥ 90 % of bought). */
+  winrate_7d: number | null;
+  winrate_30d: number | null;
+  /** Hold-time bucket: scalper | day_trader | swing | inactive | unscored. */
+  strategy: string | null;
+  closed_positions_30d: number | null;
 }
 
 export interface RhcKolFeedResponse extends FreeTierDelayMeta {
@@ -934,6 +957,24 @@ export interface RhcTokensListResponse {
   tokens: RhcTokenListItem[];
   count: number;
   sort: string;
+  /** sort=newest only — echoes the request's `since`. */
+  since?: string | null;
+  /** sort=newest only — feed back as `since` to poll for newer launches. */
+  next_since?: string | null;
+  /** sort=newest / sort=oldest only — first_seen_at semantics and the cursor contract. */
+  note?: string;
+  /** sort=oldest only — echoes the request's `after`. */
+  after?: string | null;
+  /** sort=oldest only — false ONLY when the candidates ran out. */
+  has_more?: boolean;
+  /** sort=oldest only — echoes the request's `cursor`. */
+  cursor?: string | null;
+  /** sort=oldest only (PREFERRED) — feed back as `cursor`; null = walk complete. */
+  next_cursor?: string | null;
+  /** sort=oldest only, LEGACY inclusive cursor — feed back as `after` (dedupe on token_address). */
+  next_after?: string | null;
+  /** Present when a filter had to be scanned after the candidate fetch. */
+  scan?: FeedScanInfo;
   _rid?: string;
 }
 
@@ -1146,6 +1187,13 @@ export interface RhcCandlesResponse {
   /** Candles ordered oldest → newest. */
   candles: RhcCandle[];
   count: number;
+  /** Requested window bounds (ISO 8601), echoed. */
+  from?: string | null;
+  to?: string | null;
+  /** true when the server's page budget ran out before `limit` candles or `from` were reached. */
+  truncated?: boolean;
+  /** Oldest instant actually searched; equals `from` when the whole window was scanned. */
+  covered_from?: string | null;
   _rid?: string;
 }
 
@@ -1400,6 +1448,8 @@ export interface RhcTopTradersResponse {
   has_more: boolean;
   /** States the net_eth semantics explicitly. */
   metric: string;
+  /** Interim attribution disclosure (pre-2026-07-18 history not reflected). */
+  attribution?: RhcAttributionNote;
   _rid?: string;
 }
 
@@ -1446,6 +1496,8 @@ export interface RhcFlowResponse {
     net_eth: number;
   };
   sign_convention: string;
+  /** Interim attribution disclosure (pre-2026-07-18 history not reflected). */
+  attribution?: RhcAttributionNote;
   _rid?: string;
 }
 
@@ -2143,6 +2195,12 @@ export interface RhcAlphaWallet {
   memecoin_share: number | null;
   avg_trade_mc_usd: number | null;
   last_trade_at: string | null;
+  /**
+   * Share of gross ETH extracted from tokens the wallet never bought
+   * (deployer/insider dumps). null = never sold. Wallets at ≥ 0.5 are excluded
+   * unless `include_zero_cost_dumps=true`.
+   */
+  zero_cost_share?: number | null;
 }
 
 export interface RhcAlphaWalletsResponse {
@@ -2152,6 +2210,158 @@ export interface RhcAlphaWalletsResponse {
   limit: number;
   offset: number;
   has_more: boolean;
+  /** Interim attribution disclosure (pre-2026-07-18 history not reflected). */
+  attribution?: RhcAttributionNote;
+  _rid?: string;
+}
+
+// ─── Wallet funding evidence (/rhc/wallet/{address}/funding) ─────────────────
+
+export interface RhcWalletFundingParams {
+  /** Shared funders per page, 1–20. Default 10. */
+  limit?: number;
+  /** 0–100. Default 0. */
+  offset?: number;
+}
+
+/**
+ * `ok` with an empty `shared_funders` means no shared funder was OBSERVED
+ * within coverage — never that the wallets are independent.
+ * `collection_stale`: evidence after `coverage.heartbeat_at` may be missing.
+ */
+export type RhcFundingStatus =
+  | "ok"
+  | "partial_coverage"
+  | "not_tracked"
+  | "collection_disabled"
+  | "collection_stale"
+  | "not_started";
+
+/** Aggregated transfers of one asset from a funder. Raw amounts are exact integer strings (uint256-safe). */
+export interface RhcFundingTransfer {
+  /** `"native"` (ETH) or the ERC-20 contract address. */
+  asset: string;
+  symbol: string | null;
+  decimals: number | null;
+  /** Exact integer in raw units, as a string. */
+  amount_raw: string;
+  /** Exact decimal string when decimals are known. */
+  amount: string | null;
+  transfer_count: number;
+  /** Chain block time when resolved, otherwise the collector's observation time. */
+  first_seen: string;
+  last_seen: string;
+  transactions: { tx: string; explorer_url: string }[];
+}
+
+export interface RhcSharedFunder {
+  funder: string;
+  funder_explorer_url: string;
+  funder_label: { label: string; category: string; verified: boolean } | null;
+  /** Known exchange/service: a common funding source, not a connection signal. */
+  service_funder: boolean;
+  to_this_wallet: RhcFundingTransfer[];
+  connected_wallets: {
+    address: string;
+    explorer_url: string;
+    /** Tracked-set membership (KOL EVM wallet, elite/good deployer, …). */
+    tracked_as: string[];
+    transfers: RhcFundingTransfer[];
+  }[];
+}
+
+/** Collector state needed to interpret an empty answer. */
+export interface RhcFundingCoverage {
+  collection_enabled: boolean;
+  /** off | shadow | on */
+  mode: string;
+  heartbeat_at: string | null;
+  collector_current: boolean;
+  monitoring_started_at: string | null;
+  /** Block cursor as a string (never a float). */
+  last_committed_position: string | null;
+  last_committed_at: string | null;
+  tracked_intervals: { source: string; tracked_since: string; tracked_until: string | null }[];
+  known_gaps: Record<string, unknown>[];
+  supported_transfer_types: string[];
+  unsupported_transfer_types: string[];
+  recovery: unknown;
+  history: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Cross-wallet counts for a funding source. **ULTRA+ only** — stripped from
+ * PRO responses, so always treat it as optional.
+ */
+export interface RhcFundingRelationships {
+  same_source_wallet_count: number;
+  same_source_deployer_count: number;
+  /** true when a count hit the server cap and is a floor, not a total. */
+  counts_capped: boolean;
+  note: string;
+}
+
+/** One direct funding fact ("this address sent the wallet money"). */
+export interface RhcFundingFact {
+  source_address: string;
+  asset: { funding_type: "native" | "token"; asset: string; symbol: string | null; decimals: number | null };
+  /** Exact integer string — never a float. */
+  amount_raw: string;
+  amount: string | null;
+  funded_at: string;
+  last_funded_at: string;
+  transfer_count: number;
+  /** Exchange/bridge/router: common funding, never a connection signal. */
+  shared_infrastructure?: boolean;
+  /** ULTRA+ only; absent for PRO. */
+  relationships?: RhcFundingRelationships;
+  [key: string]: unknown;
+}
+
+/** An empty native/token funding slot: why nothing is shown. */
+export interface RhcFundingEmptySlot {
+  observed: false;
+  /** not_supported | not_collected | none_observed */
+  reason: string;
+  explanation: string;
+}
+
+/**
+ * "Where was this wallet funded from?" — additive block; absent when it could
+ * not be computed (the shared-funder answer still stands). Coverage-dependent
+ * keys are only present when the server may claim them, so most fields are
+ * optional.
+ */
+export interface RhcDirectFunding {
+  observed: boolean;
+  /** Coverage level, e.g. `forward_only`. */
+  coverage: string;
+  coverage_explanation: string;
+  observation_started_at: string | null;
+  note?: string;
+  native_funding?: RhcFundingFact | RhcFundingEmptySlot | null;
+  token_funding?: RhcFundingFact | RhcFundingEmptySlot | null;
+  sources?: RhcFundingFact[];
+  source_count?: number;
+  funder_explorer_url?: string | null;
+  [key: string]: unknown;
+}
+
+export interface RhcWalletFundingResponse {
+  chain: Chain;
+  /** CAIP-2 id, e.g. `eip155:4663`. */
+  chain_id: string;
+  /** `ETH`. */
+  native_asset: string;
+  address: string;
+  status: RhcFundingStatus;
+  summary: string;
+  shared_funders: RhcSharedFunder[];
+  pagination: { limit: number; offset: number; total: number; has_more: boolean };
+  coverage: RhcFundingCoverage;
+  disclaimer: string;
+  direct_funding?: RhcDirectFunding;
   _rid?: string;
 }
 
@@ -4282,6 +4492,24 @@ class WalletClient {
   trades(address: string, params?: RhcWalletTradesParams): Promise<RhcWalletTradesResponse> {
     return this._request(
       buildUrl(this._baseUrl, `/rhc/wallet/${encodeURIComponent(address)}/trades`, params as Record<string, string | number | undefined>),
+    );
+  }
+
+  /**
+   * Shared-funder evidence for a tracked wallet: addresses that sent a
+   * qualifying native ETH or ERC-20 transfer to this wallet AND to other
+   * tracked wallets, plus the additive `direct_funding` block. Evidence of a
+   * funding connection — not proof of common ownership. Forward-looking
+   * coverage from monitoring start; internal ETH transfers are not observed.
+   * Tier: **PRO+**; `relationships` counts inside `direct_funding` are
+   * **ULTRA+** only. A 503 with `code: funding_data_unavailable` is a data
+   * error, not an empty result.
+   * @param address Wallet EVM address (0x, 40 hex). Case-insensitive.
+   * @param params Optional: limit (1–20), offset (0–100).
+   */
+  funding(address: string, params?: RhcWalletFundingParams): Promise<RhcWalletFundingResponse> {
+    return this._request(
+      buildUrl(this._baseUrl, `/rhc/wallet/${encodeURIComponent(address)}/funding`, params as Record<string, string | number | undefined>),
     );
   }
 

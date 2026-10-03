@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * route-parity-check.mjs — fails CI if this SDK references an `/rhc/*` API path
- * that is not one of the 58 published Robinhood Chain route patterns (rename
- * drift). 58 patterns — the rule-engine collection and item paths
+ * that is not one of the 59 published Robinhood Chain route patterns (rename
+ * drift). 59 patterns — the rule-engine collection and item paths
  * each serve several methods (GET/POST, GET/PATCH/DELETE).
  *
  * This standalone repo is NOT scanned by the monorepo's sdk-route-parity guard,
- * so it ships its own. The 58 patterns are pinned below (the authoritative RHC
+ * so it ships its own. The 59 patterns are pinned below (the authoritative RHC
  * surface, chain id 4663). Set OPENAPI_URL to instead validate against the live
  * spec's `/rhc/*` paths.
  *
@@ -22,7 +22,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, "..", "src");
 
-// The 58 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
+// The 59 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
 const RHC_ROUTES = [
   "/rhc/alpha-wallets",
   "/rhc/alpha/leaderboard",
@@ -79,6 +79,7 @@ const RHC_ROUTES = [
   "/rhc/wallet-tracker/watchlist",
   "/rhc/wallet-tracker/watchlist/:p",
   "/rhc/wallet/:p",
+  "/rhc/wallet/:p/funding",
   "/rhc/wallet/:p/pnl",
   "/rhc/wallet/:p/positions",
   "/rhc/wallet/:p/trades",
