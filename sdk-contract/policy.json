@@ -1,0 +1,10 @@
+{
+  "sdk": "robinhood-chain-sdk",
+  "repo": "MadeOnSol/robinhood-chain-sdk",
+  "release_unit": "npm:robinhood-chain-sdk",
+  "chains": ["rhc"],
+  "exclude": [
+    { "match": ["@alias"], "reason": "Path aliases (summary 'Alias of …') exist for customers who guess URLs; the SDK binds the canonical path, same handler." }
+  ],
+  "exclude_fields": []
+}
