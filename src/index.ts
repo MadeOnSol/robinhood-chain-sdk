@@ -2038,6 +2038,254 @@ export interface RhcAlphaWalletsResponse {
   _rid?: string;
 }
 
+// ─── Token locks & vesting (GET /rhc/tokens/locks, /rhc/tokens/{address}/locks, /rhc/tokens/unlocks) ───
+
+export type RhcLockKind = "lock" | "vesting";
+
+export type RhcUnlocksWithin = "1h" | "6h" | "24h" | "3d" | "7d" | "14d" | "30d" | "90d";
+
+export interface RhcTokenLocksParams {
+  /** 1–100. Default 50. */
+  limit?: number;
+  /** ISO instant — only locks created after it (poll cursor = pagination.next_since). */
+  since?: string;
+  /** ISO instant — only locks created before it (page back = pagination.next_before). LEGACY strict bound — prefer `cursor`. */
+  before?: string;
+  /** Opaque strict (created_at, id) cursor — `pagination.next_cursor`. Not combinable with `before`. */
+  cursor?: string;
+  token?: string;
+  /** Depositor / creator wallet. */
+  sender?: string;
+  /** Beneficiary wallet. */
+  recipient?: string;
+  /** Locker contract address. */
+  locker?: string;
+  family?: RhcLockFamily;
+  kind?: RhcLockKind;
+  /** token (default) excludes LP locks; lp = only LP locks; all = both. */
+  subject?: RhcLockSubject | "all";
+  status?: RhcLockStatus;
+  /** Post-filter on the deposited amount in USD. */
+  min_usd?: number;
+  /** Post-filter on the deposited amount as % of supply. */
+  min_pct_of_supply?: number;
+}
+
+export type RhcLockFamily =
+  | "pinklock" | "teamfinance" | "teamfinance-nft" | "uncx-v2-lp" | "uncx-v3-lp" | "uncx-vesting" | "vesting-fork"
+  | "goplus" | "titan" | "titan-position" | "titan-vesting" | "hoodlock" | "hoodlock-vesting" | "sablier";
+
+export type RhcLockSubject = "token" | "lp";
+
+export type RhcLockStatus = "active" | "completed";
+
+export interface RhcLockNextUnlock {
+  at: string;
+  kind: "cliff" | "final" | "tranche";
+  amount_raw: string;
+  amount: number | null;
+  amount_usd: number | null;
+}
+
+/**
+ * Who runs the lock contract, and how sure the server is (2026-10-02).
+ * Identity is decided by the locker CONTRACT ADDRESS, never by the family:
+ * a family is only an event shape (ABI) and forks copy shapes byte-for-byte.
+ * `verified` = a known provider deployment (HoodLock vault + vesting, Sablier
+ * Lockup v4, Titan Locker V2.1); `compatible` = the events match a known
+ * provider's ABI (`compatible_with`) but the operator is NOT identified, so
+ * `id` / `website_url` / `lock_url` are null; `unverified` = unknown shape.
+ * `lock_url` is set only where the per-lock page format is proven (the HoodLock
+ * vault's `/proof/lock/{locker_lock_id}`) — never guessed.
+ */
+export interface RhcLockProvider {
+  id: string | null;
+  name: string | null;
+  identity: "verified" | "compatible" | "unverified";
+  compatible_with: string | null;
+  website_url: string | null;
+  lock_url: string | null;
+}
+
+/** Independent on-chain evidence on Robinhood Chain Blockscout (2026-10-02). */
+export interface RhcLockExplorer {
+  locker_url: string | null;
+  creation_tx_url: string | null;
+}
+
+/**
+ * One lock / vesting contract. Amounts are raw base units as decimal STRINGS;
+ * ui / usd / pct are null when decimals or price are unknown. `withdrawn_*`
+ * is ALWAYS null — withdrawals are not tracked on RHC (create-only tape).
+ */
+export interface RhcTokenLock {
+  /** `<tx_hash>:<log_index>` — the row identity. */
+  lock_id: string;
+  locker: string;
+  locker_name: string | null;
+  /** 2026-10-02 — who runs the locker; compatible ≠ verified (see {@link RhcLockProvider}). */
+  provider: RhcLockProvider;
+  /** 2026-10-02 — Blockscout links for the locker contract and the creation tx. */
+  explorer: RhcLockExplorer;
+  family: RhcLockFamily;
+  family_name: string;
+  locker_lock_id: string | null;
+  kind: RhcLockKind;
+  subject: RhcLockSubject;
+  status: RhcLockStatus;
+  token_address: string;
+  /** Only on subject=lp. */
+  lp: { kind: "v2_pair" | "v3_position" | "v4_position" | null; pool: string | null; token0: string | null; token1: string | null; token_id: string | null } | null;
+  /** Depositor / creator — the dev-lock comparison key. */
+  sender: string;
+  recipient: string | null;
+  tx_sender: string | null;
+  name: string | null;
+  amount_raw: string | null;
+  amount: number | null;
+  amount_usd: number | null;
+  /** 2026-10-02 — the token price behind every `*_usd` field; always null on subject=lp rows. */
+  price_usd: number | null;
+  /** % of CURRENT supply; null when unknown, above 100.5, or on subject=lp rows. */
+  amount_pct_of_supply: number | null;
+  /** `token` | `lp_token` (v2 pair) | `liquidity` (uncx-v3) | null (NFT position). LP units never get usd / price / %. */
+  amount_unit: string | null;
+  locked_raw: string | null;
+  locked: number | null;
+  locked_usd: number | null;
+  locked_pct_of_supply: number | null;
+  unlocked_raw: string | null;
+  unlocked: number | null;
+  withdrawn_raw: null;
+  withdrawn: null;
+  start_at: string | null;
+  cliff_at: string | null;
+  end_at: string | null;
+  /** 2026-10-02 — seconds until fully unlocked (>= 0); 0 once completed; null without an end date (perpetual). */
+  seconds_until_end: number | null;
+  /** 2026-10-02 — seconds until `next_unlock.at` (>= 0); null without a next unlock. */
+  seconds_until_next_unlock: number | null;
+  cliff_amount_raw: string | null;
+  cliff_amount: number | null;
+  continuous: boolean;
+  perpetual: boolean;
+  schedule?: Array<{ release_at: string; amount_raw: string; amount: number | null }>;
+  next_unlock: RhcLockNextUnlock | null;
+  cancelable: boolean | null;
+  cancelable_by_sender: boolean | null;
+  transferable: boolean | null;
+  created_at: string;
+  created_at_estimated: false;
+  block_number: number;
+  block_time: string;
+  tx_hash: string;
+  log_index: number;
+  layout_verified: boolean;
+  token?: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; market_cap_usd: number | null; liquidity_usd: number | null };
+}
+
+export interface RhcLockCoverage {
+  families: readonly string[];
+  withdrawals_tracked: false;
+  cancels_tracked: false;
+  lp_locks: string;
+  note: string;
+}
+
+export interface RhcTokenLocksResponse {
+  chain: Chain;
+  locks: RhcTokenLock[];
+  pagination: { limit: number; count: number; has_more: boolean; next_cursor?: string | null; next_since: string | null; next_before: string | null; scan?: { post_filtered: boolean; scanned: number; scan_truncated: boolean; scan_budget: number } };
+  stream: { channel: string; note?: string; [k: string]: unknown };
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string };
+  _rid?: string;
+}
+
+export interface RhcTokenLockSummaryParams {
+  status?: RhcLockStatus;
+  family?: RhcLockFamily;
+  /** Default all. */
+  subject?: RhcLockSubject | "all";
+  /** 1–500. Default 200 (the summary always covers every row). */
+  limit?: number;
+}
+
+export interface RhcTokenLockSummaryResponse {
+  chain: Chain;
+  token_address: string;
+  token: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; supply: number | null; market_cap_usd: number | null; liquidity_usd: number | null; facts_resolved: boolean };
+  summary: {
+    lock_count: number; complete: boolean; rows_considered: number;
+    token_lock_count: number; lp_lock_count: number; lp_lock_active_count: number; active_count: number;
+    by_family: Record<string, number>; by_kind: Record<string, number>;
+    distinct_lockers: number; distinct_locker_contracts: number;
+    locked_raw: string; locked: number | null; locked_usd: number | null; locked_pct_of_supply: number | null;
+    deposited_raw: string; deposited: number | null; deposited_usd: number | null;
+    unlocking_7d_raw: string; unlocking_7d: number | null; unlocking_7d_usd: number | null; unlocking_7d_pct_of_supply: number | null;
+    unlocking_30d_raw: string; unlocking_30d: number | null; unlocking_30d_usd: number | null; unlocking_30d_pct_of_supply: number | null;
+    next_unlock: (RhcLockNextUnlock & { lock_id?: string }) | null;
+    active_cancelable_by_sender: number;
+  };
+  locks: RhcTokenLock[];
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string; source: string };
+  _rid?: string;
+}
+
+export interface RhcTokenUnlocksParams {
+  /** Default 7d. */
+  within?: RhcUnlocksWithin;
+  token?: string;
+  family?: RhcLockFamily;
+  kind?: RhcLockKind;
+  /** On the next-event amount. */
+  min_usd?: number;
+  /** On the next-event amount. */
+  min_pct_of_supply?: number;
+  /** Default soonest. */
+  sort?: "soonest" | "largest_usd" | "largest_pct";
+  /** 1–200. Default 50. */
+  limit?: number;
+}
+
+export interface RhcTokenUnlock {
+  unlock_at: string;
+  in_seconds: number;
+  event: "cliff" | "final" | "tranche";
+  amount_raw: string;
+  amount: number | null;
+  amount_usd: number | null;
+  amount_pct_of_supply: number | null;
+  window_amount_raw: string;
+  window_amount: number | null;
+  window_amount_usd: number | null;
+  window_amount_pct_of_supply: number | null;
+  token_address: string;
+  token: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; market_cap_usd: number | null };
+  lock: {
+    lock_id: string; locker: string; locker_name: string | null; family: RhcLockFamily; kind: RhcLockKind; name: string | null;
+    sender: string; recipient: string | null;
+    amount_raw: string; amount: number | null; amount_usd: number | null;
+    locked_raw: string; locked: number | null; locked_usd: number | null;
+    cliff_at: string | null; end_at: string | null; cancelable_by_sender: boolean | null; tx_hash: string;
+  };
+}
+
+export interface RhcTokenUnlocksResponse {
+  chain: Chain;
+  window: { within: RhcUnlocksWithin; from: string; to: string };
+  unlocks: RhcTokenUnlock[];
+  pagination: { limit: number; count: number; total_in_window: number; has_more: boolean; candidates_capped: boolean };
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string; source: string };
+  _rid?: string;
+}
+
+
+/** `GET /rhc/tokens/{address}/early-buyers` — first buyers of a token, ranked, with still-holding status. Untyped body (shape not yet pinned in the SDK). */
+export type RhcEarlyBuyersResponse = Record<string, unknown> & { _rid?: string };
+
 // ─── Wallet intelligence ─────────────────────────────────────────────────────
 //
 // Every figure below is ETH-denominated. Cost basis is FIFO over a rolling
@@ -2061,8 +2309,10 @@ export interface RhcWalletStats {
   realized_pnl_eth: number;
   unrealized_pnl_eth: number;
   total_pnl_eth: number;
+  /** FIFO-unmatched DEX buys x current price. NOT an on-chain balance: see `holdings.verified_value_eth` on the profile. */
   held_value_eth: number;
   unique_tokens: number;
+  /** FIFO-open positions (unmatched DEX buys). How many are actually still held is in the profile's `holdings`. */
   open_positions: number;
   window_days: number;
   /** Hit the per-wallet trade cap — figures cover part of the window only. */
@@ -2100,11 +2350,67 @@ export interface RhcWalletProfileResponse {
     avg_trade_size_eth: number | null;
     is_active: boolean;
   };
+  /**
+   * Server 2026-10-02 — on-chain verification of every FIFO-open position.
+   * `top_tokens[].holding_status` carries the per-token status
+   * ({@link RhcHoldingStatus}; null when the token is FIFO-closed), and
+   * `top_tokens[].still_holding` keeps its FIFO meaning. null when the
+   * snapshot was unavailable; absent on older servers.
+   */
+  holdings?: RhcHoldingsSummary | null;
   /** Snapshot timed out — `flags` still resolve. */
   stats_unavailable: boolean;
   /** The wallet trio shares one snapshot cache; `true` = this call reused it. */
   cache_hit: boolean;
   _rid?: string;
+}
+
+/**
+ * Server 2026-10-02 — on-chain status of a FIFO-open position, from
+ * `balanceOf` on our own Robinhood Chain node. `HELD` = balance within 0.5 % of
+ * the FIFO amount; `PARTIALLY_REDUCED` = 0 < balance < FIFO;
+ * `TRANSFERRED_OR_DISPOSED` = balance 0; `EXTERNAL_INFLOW` = balance > FIFO (the
+ * excess has no cost basis, never trading profit); `BALANCE_UNVERIFIED` = the
+ * read failed, the token is non-standard or decimals disagree (no value, never
+ * assumed held).
+ */
+export type RhcHoldingStatus =
+  | "HELD"
+  | "PARTIALLY_REDUCED"
+  | "TRANSFERRED_OR_DISPOSED"
+  | "EXTERNAL_INFLOW"
+  | "BALANCE_UNVERIFIED";
+
+export type RhcHoldingUnverifiedReason =
+  | "rpc_unavailable"
+  | "call_failed"
+  | "decimals_failed"
+  | "over_cap"
+  | "decimals_mismatch"
+  | "decimals_unknown";
+
+/** Proven-holdings view over every FIFO-open position (`holdings` / `summary.holdings`). */
+export interface RhcHoldingsSummary {
+  balance_source: "rhc_node_multicall3";
+  checked_at: string;
+  /** `false` when at least one position is BALANCE_UNVERIFIED (it contributes no value). */
+  complete: boolean;
+  fifo_open_positions: number;
+  held: number;
+  partially_reduced: number;
+  transferred_or_disposed: number;
+  external_inflow: number;
+  unverified: number;
+  /** Proven balances x current price. Unverified and unpriced positions contribute nothing. */
+  verified_value_eth: number;
+  /** Verified positions with a non-zero balance but no current price. */
+  unpriced_held: number;
+  /** Cost basis of the FIFO-known portion still in the wallet. */
+  cost_basis_held_eth: number;
+  /** Unrealized PnL on the known-cost, still-held portion only. */
+  unrealized_known_eth: number;
+  /** Cost basis of FIFO lots no longer in the wallet. Outcome unknown: neither realized nor unrealized. */
+  cost_basis_not_held_eth: number;
 }
 
 export interface RhcOpenPosition {
@@ -2128,6 +2434,29 @@ export interface RhcOpenPosition {
   realized_so_far_eth: number;
   first_buy_at: string | null;
   last_buy_at: string | null;
+}
+
+/**
+ * A `/positions` row: the FIFO position (unchanged meaning) plus its on-chain
+ * check. The balance fields are absent on servers older than 2026-10-02.
+ */
+export interface RhcVerifiedOpenPosition extends RhcOpenPosition {
+  /** Same as `token_amount`: DEX buys not matched by a DEX sell. A trading position, not a balance. */
+  fifo_unmatched_amount?: number | null;
+  /** balanceOf(wallet) / 10^decimals from our node. null = not proven. */
+  current_onchain_balance?: number | null;
+  holding_status?: RhcHoldingStatus;
+  holding_unverified_reason?: RhcHoldingUnverifiedReason | null;
+  /** min(balance, FIFO): the held part whose cost basis is known. */
+  held_known_amount?: number | null;
+  external_inflow_amount?: number | null;
+  /** current_onchain_balance x current price. 0 when transferred out; null when unverified or unpriced. */
+  current_holding_value_eth?: number | null;
+  cost_basis_held_eth?: number | null;
+  /** Unrealized on the known-cost, still-held portion only. */
+  unrealized_known_eth?: number | null;
+  /** Cost basis of the FIFO portion no longer in the wallet. Outcome unknown. */
+  cost_basis_not_held_eth?: number | null;
 }
 
 export interface RhcClosedPosition {
@@ -2198,8 +2527,11 @@ export interface RhcWalletPositionsResponse {
     total_unrealized_eth: number;
     /** Excluded from the value and unrealized totals. */
     unpriced_positions: number;
+    /** Server 2026-10-02 — on-chain verification of the positions; absent on older servers. */
+    holdings?: RhcHoldingsSummary;
   };
-  positions: RhcOpenPosition[];
+  /** FIFO positions plus (server 2026-10-02) their on-chain balance check. */
+  positions: RhcVerifiedOpenPosition[];
   notes: Record<string, unknown>;
   _rid?: string;
 }
@@ -2375,6 +2707,24 @@ export interface RhcCopyTradeSubscription {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** Source wallets that are tracked RHC KOL wallets (only these can fire). null when the tracking read failed. Server 2026-09-25 on. */
+  source_wallets_tracked?: string[] | null;
+  /** Source wallets that are not tracked: they never produce a signal. */
+  source_wallets_untracked?: string[] | null;
+  /** Present only when something needs attention — e.g. `untracked_source_wallets`. */
+  warnings?: RhcCopyTradeRuleWarning[];
+  /**
+   * Server 2026-10-02 — whether the rule can fire at all, separate from
+   * `is_active` (your switch): `eligible` (at least one tracked source wallet),
+   * `no_tracked_sources` (kept, but can never fire) or `unknown` (the tracking
+   * read failed; never assumed eligible). Absent on older servers.
+   */
+  operational_state?: "eligible" | "no_tracked_sources" | "unknown";
+}
+
+export interface RhcCopyTradeRuleWarning {
+  code: "untracked_source_wallets" | "source_wallet_tracking_unavailable" | (string & {});
+  message: string;
 }
 
 export interface RhcCopyTradeListResponse {
@@ -2406,6 +2756,8 @@ export interface RhcCopyTradeCreateResponse {
   /** Shown ONCE — null when `delivery_mode` is `websocket`. */
   webhook_secret: string | null;
   note: string;
+  /** Mirror of `subscription.warnings` — present when any source wallet is untracked or the tracking lookup was unavailable. */
+  warnings?: RhcCopyTradeRuleWarning[];
   _rid?: string;
 }
 
@@ -3079,6 +3431,50 @@ class TokensClient {
    */
   equities(params?: RhcEquitiesParams): Promise<RhcEquitiesResponse> {
     return this._fetch(buildUrl(this._baseUrl, "/rhc/equities", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Token locks & vesting feed — newest lock / vesting contracts CREATED on
+   * chain across all tokens, decoded from the locker contracts' own events on
+   * our node. Each row carries the on-chain schedule, a live derived view
+   * (`locked_*`, `unlocked_*`, `next_unlock`, `status`, countdowns) and
+   * provenance (`provider.identity`: verified / compatible / unverified;
+   * `explorer` links). **Create-only**: withdrawals are not tracked
+   * (`withdrawn` is null, `coverage.withdrawals_tracked: false`). LP locks are
+   * excluded unless `subject: "lp" | "all"` and never claim usd / pct. Amounts
+   * are raw base units as STRINGS. Cursor: `pagination.next_cursor` (or
+   * `next_since` to poll). Tier: **PRO+**. `GET /rhc/tokens/locks`
+   */
+  locksFeed(params?: RhcTokenLocksParams): Promise<RhcTokenLocksResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/tokens/locks", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Every lock / vesting contract on ONE token with a live summary: locked /
+   * deposited (raw + ui + usd + % of supply), `unlocking_7d` / `unlocking_30d`,
+   * nearest `next_unlock`, `active_cancelable_by_sender`, counts by family /
+   * kind; LP locks counted apart. Tier: **PRO+**. `GET /rhc/tokens/{address}/locks`
+   */
+  locks(address: string, params?: RhcTokenLockSummaryParams): Promise<RhcTokenLockSummaryResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/locks`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Upcoming unlock EVENTS across all active lock / vesting contracts — each
+   * contract's next cliff / tranche / final unlock inside the window with the
+   * event amount and the contract's total release over the window. Token
+   * subject only. Tier: **PRO+**. `GET /rhc/tokens/unlocks`
+   */
+  unlocks(params?: RhcTokenUnlocksParams): Promise<RhcTokenUnlocksResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/tokens/unlocks", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * First buyers of a token, ranked, with still-holding status. Tier: **PRO+**.
+   * `GET /rhc/tokens/{address}/early-buyers`
+   */
+  earlyBuyers(address: string, params?: { limit?: number }): Promise<RhcEarlyBuyersResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/early-buyers`, params as Record<string, string | number | undefined>));
   }
 
   /**
