@@ -63,19 +63,53 @@ export type DeployerTier = "elite" | "good" | "neutral" | "spammer";
 /** Uniswap DEX version on Robinhood Chain. */
 export type UniswapVersion = "uniswap-v2" | "uniswap-v3" | "uniswap-v4";
 
+/** Free (BASIC) tier 5-minute delay metadata — present only on delayed feed responses. */
+export interface FreeTierDelayMeta {
+  /** e.g. "5m" */
+  delay?: string;
+  delay_seconds?: number;
+  /** The delayed cutoff the page was served at. */
+  as_of?: string;
+  delay_note?: string;
+  /** Pricing URL. */
+  upgrade?: string;
+}
+
+/** Present when a filter was applied after the candidate fetch. `scan_truncated: true` means more matches MAY exist past `next_cursor`. */
+export interface FeedScanInfo {
+  post_filtered: boolean;
+  scanned: number;
+  scan_truncated: boolean;
+  scan_budget: number;
+}
+
 // ─── KOL feed (/rhc/kol/feed) ────────────────────────────────────────────────
 
 export interface RhcKolFeedParams {
   /** Number of trades to return (1–100). Default: 50. */
   limit?: number;
-  /** Cursor — return trades strictly older than this ISO 8601 timestamp. Pass `next_before` from the previous response. */
+  /** LEGACY cursor — trades strictly older than this ISO 8601 timestamp (skips same-timestamp rows). Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (traded_at, id) keyset. Cannot be combined with `before`. */
+  cursor?: string;
   /** Filter by trade direction. */
   action?: TradeAction;
   /** Filter to a single KOL by their EVM wallet address (0x, 40 hex). */
   kol?: string;
   /** Minimum trade size in ETH. */
   min_eth?: number;
+  /** Exclude sell-side trades. */
+  exclude_sells?: boolean;
+  /** Minimum KOL win rate, 0–1 (closed positions only; unscored KOLs are dropped, so 0 is not a no-op). */
+  min_kol_winrate?: number;
+  /** Hold-time bucket (not Solana's strategy tag). */
+  strategy?: "scalper" | "day_trader" | "swing" | "inactive" | "unscored";
+  /** Max token age in minutes at trade time (1–43200). */
+  token_age_max_min?: number;
+  /** Lower bound on market cap at trade (USD). */
+  min_mc_usd?: number;
+  /** Upper bound on market cap at trade (USD). */
+  max_mc_usd?: number;
 }
 
 /** One KOL trade row from `/rhc/kol/feed`. */
@@ -116,14 +150,24 @@ export interface RhcKolFeedTrade {
   traded_at: string;
 }
 
-export interface RhcKolFeedResponse {
+export interface RhcKolFeedResponse extends FreeTierDelayMeta {
   chain: Chain;
   trades: RhcKolFeedTrade[];
   count: number;
+  /** Echo of the score filters. */
+  filtered_by?: { min_kol_winrate: number | null; strategy: string | null };
+  /** KOLs that passed the score filters; null when none were set. */
+  matched_kols?: number | null;
   /** Age of the newest row, seconds. */
-  data_age_seconds: number | null;
-  /** Cursor for the next page — pass as `before` to fetch older trades. */
+  data_age_seconds?: number | null;
+  /** LEGACY strict timestamp cursor — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end. */
+  next_cursor?: string | null;
+  /** false only when the candidate feed is exhausted. */
+  has_more?: boolean;
+  /** Present when a filter was applied after the candidate fetch. */
+  scan?: FeedScanInfo;
   _rid?: string;
 }
 
@@ -321,8 +365,10 @@ export interface RhcFirstTouchesParams {
   limit?: number;
   /** Only first-touches strictly newer than this ISO 8601 timestamp (poll forward). */
   since?: string;
-  /** Cursor — only first-touches strictly older than this ISO 8601 timestamp. Pass `next_before`. */
+  /** LEGACY cursor — only first-touches strictly older than this ISO 8601 timestamp. Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (first_buy_at, id) keyset. */
+  cursor?: string;
   /** Minimum first-buy size in ETH (0–100000). */
   min_eth?: number;
   /** Only tokens younger than N minutes at first touch (1–43200) — isolates genuinely early calls. */
@@ -364,12 +410,16 @@ export interface RhcFirstTouch {
   first_kol: RhcFirstTouchKol;
 }
 
-export interface RhcKolFirstTouchesResponse {
+export interface RhcKolFirstTouchesResponse extends FreeTierDelayMeta {
   chain: Chain;
   events: RhcFirstTouch[];
   count: number;
-  /** Cursor for the next page — pass as `before` to fetch older first-touches. */
+  /** LEGACY strict timestamp cursor — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end (or when the server cannot offer an exact cursor). */
+  next_cursor?: string | null;
+  /** Exact (limit+1 probe); null only when the server cannot determine it. */
+  has_more?: boolean | null;
   /** Age of the newest event, seconds. */
   data_age_seconds: number | null;
   _rid?: string;
@@ -954,23 +1004,58 @@ export interface RhcEquitiesResponse {
 
 // ─── Token snapshot (/rhc/tokens/{address}) ──────────────────────────────────
 
+/** Reputation fields are null while the deployer is not yet in the reputation view (`history_status: "pending"`) or the lookup failed (`"unavailable"`). */
 export interface RhcTokenDeployer {
   address: string;
-  tier: DeployerTier;
-  tokens_deployed: number;
+  tier: DeployerTier | null;
+  tokens_deployed: number | null;
   graduation_rate: number | null;
   runner_rate: number | null;
-  runners: number;
+  runners: number | null;
   best_peak_mc_usd: number | null;
-  launchpads: string[];
+  launchpads: string[] | null;
+  /** The creator is resolved from the token row. */
+  identity_status?: "known";
+  /** computed | pending (not in the reputation view yet) | unavailable (lookup failed — not the same as "new"). */
+  history_status?: "computed" | "pending" | "unavailable";
+}
+
+export interface RhcTokenKolParticipant {
+  kol_id: string;
+  name: string | null;
+  twitter_url: string | null;
+  buys: number;
+  sells: number;
+  last_trade_at: string | null;
 }
 
 export interface RhcTokenKolActivity {
   distinct_kols: number;
+  /** Up to 20 distinct KOL names. */
   names: string[];
   buys: number;
   sells: number;
   net_eth: number;
+  distinct_wallets?: number;
+  buy_eth?: number;
+  sell_eth?: number;
+  /** Up to 20 per-KOL rows. */
+  participants?: RhcTokenKolParticipant[];
+  /** Identity the counts are keyed on (e.g. "kol_wallet_id"). */
+  identity?: string;
+  /** all_time (exact aggregate) or latest_trades (fallback sample). */
+  window?: { kind: "all_time" | "latest_trades"; first_trade_at: string | null; last_trade_at: string | null };
+  /** "all_trades" or "latest_<N>_trades". */
+  basis?: string;
+  /** Fallback sample only. */
+  sample_size?: number;
+  /** false when a full fallback sample may have cut older trades. */
+  complete?: boolean;
+  /** Free-tier delay disclosure (only this block is delayed). */
+  delay?: string;
+  as_of?: string;
+  delay_note?: string;
+  upgrade?: string;
 }
 
 export interface RhcTokenSnapshot {
@@ -984,10 +1069,17 @@ export interface RhcTokenSnapshot {
   graduated_pool: string | null;
   graduated_at: string | null;
   deployer_address: string | null;
+  /** known | unresolved (no creator on the token row) | unavailable (token row not found). */
+  deployer_identity_status?: "known" | "unresolved" | "unavailable";
   first_seen_at: string | null;
   token_age_minutes: number | null;
   price_usd: number | null;
   price_native: number | null;
+  /** Time of the trade that set the price. */
+  price_observed_at?: string | null;
+  price_age_seconds?: number | null;
+  price_is_stale?: boolean;
+  price_updated_at?: string | null;
   market_cap_usd: number | null;
   fdv_usd: number | null;
   peak_mc_usd: number | null;
@@ -995,6 +1087,9 @@ export interface RhcTokenSnapshot {
   drawdown_from_peak_pct: number | null;
   total_supply_raw: string | null;
   liquidity_usd: number | null;
+  /** `v4_virtual_ceiling` = Uniswap v4 virtual-reserve ceiling, not measured TVL. */
+  liquidity_basis?: "v4_virtual_ceiling" | "measured";
+  liquidity_note?: string;
   primary_dex: string | null;
   primary_pool: string | null;
   last_trade_time: string | null;
@@ -1003,8 +1098,10 @@ export interface RhcTokenSnapshot {
   /** Up to 10 other tokens by the same deployer (symbol or address). */
   deployer_other_tokens: string[];
   kol_activity: RhcTokenKolActivity;
-  /** Up to 20 pools with reserves/liquidity/sqrt_price. */
+  /** Up to 20 pools with reserves/liquidity/sqrt_price (+ `liquidity_basis`). */
   pools: Array<Record<string, unknown>>;
+  /** Fields whose enrichment read failed (e.g. "deployer_other_tokens"). */
+  degraded_fields?: string[];
   _rid?: string;
 }
 
@@ -1089,7 +1186,7 @@ export interface RhcKolConsensusResponse {
 
 // ─── Buyer quality (/rhc/tokens/{address}/buyer-quality) ─────────────────────
 
-export type QualityConfidence = "low" | "medium" | "high";
+export type QualityConfidence = "low" | "medium" | "high" | "insufficient_data";
 export type QualitySignal = "positive" | "neutral" | "negative";
 
 export interface RhcBuyerQualityBreakdown {
@@ -1105,6 +1202,10 @@ export interface RhcBuyerQualityBreakdown {
   /** Percent (0–100), non-bot buyers with ≥3 tokens of history. */
   avg_historical_win_rate: number | null;
   bot_dominated: boolean;
+  /** Early buyers with any trading history. */
+  wallets_with_history?: number;
+  /** Buyers whose win rate fed the score (what `confidence` counts). */
+  qualified_win_rate_wallets?: number;
 }
 
 export interface RhcBuyerQuality {
@@ -1118,12 +1219,16 @@ export interface RhcBuyerQualityCoverage {
   bundle_detection: "available";
   dump_cluster_signal: "available";
   note?: string;
+  /** Pre-2026-07-18 launches: the cohort is the earliest ATTRIBUTED buyers. */
+  earliest_buyers_caveat?: string;
 }
 
 export interface RhcBuyerQualityResponse {
   chain: Chain;
   token_address: string;
   current_mc_usd: number | null;
+  /** distinct_first_buy (first 20 distinct buyer EOAs) or legacy_row_window. */
+  cohort_selection?: "distinct_first_buy" | "legacy_row_window";
   quality: RhcBuyerQuality;
   coverage?: RhcBuyerQualityCoverage;
   /** Present only when buyer data is insufficient. */
@@ -1858,8 +1963,10 @@ export interface RhcDeployerAlertsParams {
   offset?: number;
   /** Poll forward — only alerts with `event_at` strictly newer than this ISO 8601 timestamp. Pass `next_event_at`. */
   since?: string;
-  /** Page back — only alerts strictly older than this ISO 8601 timestamp. Pass `next_before`. Takes precedence over `offset`. */
+  /** LEGACY page back — only alerts strictly older than this ISO 8601 timestamp. Prefer `cursor`. */
   before?: string;
+  /** PREFERRED pagination: `next_cursor` from the previous page — opaque strict (event_at, id) keyset. */
+  cursor?: string;
   /** Disables the default $100 liquidity gate and returns the raw tape. */
   include_untradeable?: boolean;
 }
@@ -1885,23 +1992,33 @@ export interface RhcDeployerAlert {
   mc_at_alert: number | null;
   current_mc_usd: number | null;
   liquidity_usd: number | null;
+  /** `v4_virtual_ceiling` = Uniswap v4 virtual-reserve ceiling, not measured TVL. */
+  liquidity_basis?: "v4_virtual_ceiling" | "measured";
   priority: RhcAlertPriority;
   is_active: boolean;
   created_at: string;
   event_at: string | null;
 }
 
-export interface RhcDeployerAlertsResponse {
+export interface RhcDeployerAlertsResponse extends FreeTierDelayMeta {
   chain: Chain;
   alerts: RhcDeployerAlert[];
   limit: number;
   offset: number;
   /** Echoes whether the default liquidity gate ran — `liquidity_usd >= $100` or `off (include_untradeable=true)`. */
   tradability_filter: string;
+  /** How to read `liquidity_basis`. */
+  liquidity_note?: string;
   /** Newest `event_at` on this page — pass back as `since` to poll forward. */
   next_event_at: string | null;
-  /** Oldest `event_at` on this page — pass as `before` to page back. */
+  /** LEGACY: event_at of the last row consumed — pass as `before`. Prefer `next_cursor`. */
   next_before: string | null;
+  /** Pass as `cursor` for the next (older) page; null at the end. */
+  next_cursor?: string | null;
+  /** false only when the candidate feed is exhausted. */
+  has_more?: boolean;
+  /** Present when a post-filter was applied. */
+  scan?: FeedScanInfo;
   /** Age of the newest alert, seconds. */
   data_age_seconds: number | null;
   _rid?: string;
@@ -2038,6 +2155,297 @@ export interface RhcAlphaWalletsResponse {
   _rid?: string;
 }
 
+// ─── Token locks & vesting (GET /rhc/tokens/locks, /rhc/tokens/{address}/locks, /rhc/tokens/unlocks) ───
+
+export type RhcLockKind = "lock" | "vesting";
+
+export type RhcUnlocksWithin = "1h" | "6h" | "24h" | "3d" | "7d" | "14d" | "30d" | "90d";
+
+export interface RhcTokenLocksParams {
+  /** 1–100. Default 50. */
+  limit?: number;
+  /** ISO instant — only locks created after it (poll cursor = pagination.next_since). */
+  since?: string;
+  /** ISO instant — only locks created before it (page back = pagination.next_before). LEGACY strict bound — prefer `cursor`. */
+  before?: string;
+  /** Opaque strict (created_at, id) cursor — `pagination.next_cursor`. Not combinable with `before`. */
+  cursor?: string;
+  token?: string;
+  /** Depositor / creator wallet. */
+  sender?: string;
+  /** Beneficiary wallet. */
+  recipient?: string;
+  /** Locker contract address. */
+  locker?: string;
+  family?: RhcLockFamily;
+  kind?: RhcLockKind;
+  /** token (default) excludes LP locks; lp = only LP locks; all = both. */
+  subject?: RhcLockSubject | "all";
+  status?: RhcLockStatus;
+  /** Post-filter on the deposited amount in USD. */
+  min_usd?: number;
+  /** Post-filter on the deposited amount as % of supply. */
+  min_pct_of_supply?: number;
+}
+
+export type RhcLockFamily =
+  | "pinklock" | "teamfinance" | "teamfinance-nft" | "uncx-v2-lp" | "uncx-v3-lp" | "uncx-vesting" | "vesting-fork"
+  | "goplus" | "titan" | "titan-position" | "titan-vesting" | "hoodlock" | "hoodlock-vesting" | "sablier";
+
+export type RhcLockSubject = "token" | "lp";
+
+export type RhcLockStatus = "active" | "completed";
+
+export interface RhcLockNextUnlock {
+  at: string;
+  kind: "cliff" | "final" | "tranche";
+  amount_raw: string;
+  amount: number | null;
+  amount_usd: number | null;
+}
+
+/**
+ * Who runs the lock contract, and how sure the server is (2026-10-02).
+ * Identity is decided by the locker CONTRACT ADDRESS, never by the family:
+ * a family is only an event shape (ABI) and forks copy shapes byte-for-byte.
+ * `verified` = a known provider deployment (HoodLock vault + vesting, Sablier
+ * Lockup v4, Titan Locker V2.1); `compatible` = the events match a known
+ * provider's ABI (`compatible_with`) but the operator is NOT identified, so
+ * `id` / `website_url` / `lock_url` are null; `unverified` = unknown shape.
+ * `lock_url` is set only where the per-lock page format is proven (the HoodLock
+ * vault's `/proof/lock/{locker_lock_id}`) — never guessed.
+ */
+export interface RhcLockProvider {
+  id: string | null;
+  name: string | null;
+  identity: "verified" | "compatible" | "unverified";
+  compatible_with: string | null;
+  website_url: string | null;
+  lock_url: string | null;
+}
+
+/** Independent on-chain evidence on Robinhood Chain Blockscout (2026-10-02). */
+export interface RhcLockExplorer {
+  locker_url: string | null;
+  creation_tx_url: string | null;
+}
+
+/**
+ * One lock / vesting contract. Amounts are raw base units as decimal STRINGS;
+ * ui / usd / pct are null when decimals or price are unknown. `withdrawn_*`
+ * is ALWAYS null — withdrawals are not tracked on RHC (create-only tape).
+ */
+export interface RhcTokenLock {
+  /** `<tx_hash>:<log_index>` — the row identity. */
+  lock_id: string;
+  locker: string;
+  locker_name: string | null;
+  /** 2026-10-02 — who runs the locker; compatible ≠ verified (see {@link RhcLockProvider}). */
+  provider: RhcLockProvider;
+  /** 2026-10-02 — Blockscout links for the locker contract and the creation tx. */
+  explorer: RhcLockExplorer;
+  family: RhcLockFamily;
+  family_name: string;
+  locker_lock_id: string | null;
+  kind: RhcLockKind;
+  subject: RhcLockSubject;
+  status: RhcLockStatus;
+  token_address: string;
+  /** Only on subject=lp. */
+  lp: { kind: "v2_pair" | "v3_position" | "v4_position" | null; pool: string | null; token0: string | null; token1: string | null; token_id: string | null } | null;
+  /** Depositor / creator — the dev-lock comparison key. */
+  sender: string;
+  recipient: string | null;
+  tx_sender: string | null;
+  name: string | null;
+  amount_raw: string | null;
+  amount: number | null;
+  amount_usd: number | null;
+  /** 2026-10-02 — the token price behind every `*_usd` field; always null on subject=lp rows. */
+  price_usd: number | null;
+  /** % of CURRENT supply; null when unknown, above 100.5, or on subject=lp rows. */
+  amount_pct_of_supply: number | null;
+  /** `token` | `lp_token` (v2 pair) | `liquidity` (uncx-v3) | null (NFT position). LP units never get usd / price / %. */
+  amount_unit: string | null;
+  locked_raw: string | null;
+  locked: number | null;
+  locked_usd: number | null;
+  locked_pct_of_supply: number | null;
+  unlocked_raw: string | null;
+  unlocked: number | null;
+  withdrawn_raw: null;
+  withdrawn: null;
+  start_at: string | null;
+  cliff_at: string | null;
+  end_at: string | null;
+  /** 2026-10-02 — seconds until fully unlocked (>= 0); 0 once completed; null without an end date (perpetual). */
+  seconds_until_end: number | null;
+  /** 2026-10-02 — seconds until `next_unlock.at` (>= 0); null without a next unlock. */
+  seconds_until_next_unlock: number | null;
+  cliff_amount_raw: string | null;
+  cliff_amount: number | null;
+  continuous: boolean;
+  perpetual: boolean;
+  schedule?: Array<{ release_at: string; amount_raw: string; amount: number | null }>;
+  next_unlock: RhcLockNextUnlock | null;
+  cancelable: boolean | null;
+  cancelable_by_sender: boolean | null;
+  transferable: boolean | null;
+  created_at: string;
+  created_at_estimated: false;
+  block_number: number;
+  block_time: string;
+  tx_hash: string;
+  log_index: number;
+  layout_verified: boolean;
+  token?: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; market_cap_usd: number | null; liquidity_usd: number | null };
+}
+
+export interface RhcLockCoverage {
+  families: readonly string[];
+  withdrawals_tracked: false;
+  cancels_tracked: false;
+  lp_locks: string;
+  note: string;
+}
+
+export interface RhcTokenLocksResponse {
+  chain: Chain;
+  locks: RhcTokenLock[];
+  pagination: { limit: number; count: number; has_more: boolean; next_cursor?: string | null; next_since: string | null; next_before: string | null; scan?: { post_filtered: boolean; scanned: number; scan_truncated: boolean; scan_budget: number } };
+  stream: { channel: string; note?: string; [k: string]: unknown };
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string };
+  _rid?: string;
+}
+
+export interface RhcTokenLockSummaryParams {
+  status?: RhcLockStatus;
+  family?: RhcLockFamily;
+  /** Default all. */
+  subject?: RhcLockSubject | "all";
+  /** 1–500. Default 200 (the summary always covers every row). */
+  limit?: number;
+}
+
+export interface RhcTokenLockSummaryResponse {
+  chain: Chain;
+  token_address: string;
+  token: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; supply: number | null; market_cap_usd: number | null; liquidity_usd: number | null; facts_resolved: boolean };
+  summary: {
+    lock_count: number; complete: boolean; rows_considered: number;
+    token_lock_count: number; lp_lock_count: number; lp_lock_active_count: number; active_count: number;
+    by_family: Record<string, number>; by_kind: Record<string, number>;
+    distinct_lockers: number; distinct_locker_contracts: number;
+    locked_raw: string; locked: number | null; locked_usd: number | null; locked_pct_of_supply: number | null;
+    deposited_raw: string; deposited: number | null; deposited_usd: number | null;
+    unlocking_7d_raw: string; unlocking_7d: number | null; unlocking_7d_usd: number | null; unlocking_7d_pct_of_supply: number | null;
+    unlocking_30d_raw: string; unlocking_30d: number | null; unlocking_30d_usd: number | null; unlocking_30d_pct_of_supply: number | null;
+    next_unlock: (RhcLockNextUnlock & { lock_id?: string }) | null;
+    active_cancelable_by_sender: number;
+  };
+  locks: RhcTokenLock[];
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string; source: string };
+  _rid?: string;
+}
+
+export interface RhcTokenUnlocksParams {
+  /** Default 7d. */
+  within?: RhcUnlocksWithin;
+  token?: string;
+  family?: RhcLockFamily;
+  kind?: RhcLockKind;
+  /** On the next-event amount. */
+  min_usd?: number;
+  /** On the next-event amount. */
+  min_pct_of_supply?: number;
+  /** Default soonest. */
+  sort?: "soonest" | "largest_usd" | "largest_pct";
+  /** 1–200. Default 50. */
+  limit?: number;
+}
+
+export interface RhcTokenUnlock {
+  unlock_at: string;
+  in_seconds: number;
+  event: "cliff" | "final" | "tranche";
+  amount_raw: string;
+  amount: number | null;
+  amount_usd: number | null;
+  amount_pct_of_supply: number | null;
+  window_amount_raw: string;
+  window_amount: number | null;
+  window_amount_usd: number | null;
+  window_amount_pct_of_supply: number | null;
+  token_address: string;
+  token: { symbol: string | null; name: string | null; decimals: number | null; price_usd: number | null; market_cap_usd: number | null };
+  lock: {
+    lock_id: string; locker: string; locker_name: string | null; family: RhcLockFamily; kind: RhcLockKind; name: string | null;
+    sender: string; recipient: string | null;
+    amount_raw: string; amount: number | null; amount_usd: number | null;
+    locked_raw: string; locked: number | null; locked_usd: number | null;
+    cliff_at: string | null; end_at: string | null; cancelable_by_sender: boolean | null; tx_hash: string;
+  };
+}
+
+export interface RhcTokenUnlocksResponse {
+  chain: Chain;
+  window: { within: RhcUnlocksWithin; from: string; to: string };
+  unlocks: RhcTokenUnlock[];
+  pagination: { limit: number; count: number; total_in_window: number; has_more: boolean; candidates_capped: boolean };
+  coverage: RhcLockCoverage;
+  meta: { families: readonly string[]; note: string; source: string };
+  _rid?: string;
+}
+
+
+/** One ranked early buyer on `GET /rhc/tokens/{address}/early-buyers`. */
+export interface RhcEarlyBuyer {
+  rank: number;
+  wallet: string;
+  first_buy_at: string | null;
+  first_buy_block: number | null;
+  /** null when there is no holding data for the wallet. */
+  still_holding: boolean | null;
+  /** Raw token balance (decimal string) from the Transfer-log fold. */
+  balance: string | null;
+  position: "open" | "closed" | "unknown";
+  bought_eth: number | null;
+  sold_eth: number | null;
+  /** sold_eth − bought_eth; a profit only when position is "closed". */
+  realized_eth: number | null;
+  trades: number | null;
+  avg_entry_mc_usd: number | null;
+}
+
+/**
+ * `GET /rhc/tokens/{address}/early-buyers` — first buyers of a token, ranked, with
+ * still-holding status. An unranked token returns an empty list with
+ * `summary: null` and a `note` (ranks come from a daily sweep).
+ */
+export interface RhcEarlyBuyersResponse {
+  chain: Chain;
+  token_address: string;
+  early_buyers: RhcEarlyBuyer[];
+  count: number;
+  computed_at: string | null;
+  /** still_holding is exact only when this is true. */
+  holdings_verified: boolean | null;
+  summary: {
+    ranked: number;
+    with_holding_data: number;
+    still_holding: number;
+    exited: number;
+    closed_positions: number;
+    realized_eth_closed_only: number | null;
+  } | null;
+  source?: { method: string; note: string };
+  /** Present on the unranked answer. */
+  note?: string;
+  _rid?: string;
+}
+
 // ─── Wallet intelligence ─────────────────────────────────────────────────────
 //
 // Every figure below is ETH-denominated. Cost basis is FIFO over a rolling
@@ -2061,8 +2469,10 @@ export interface RhcWalletStats {
   realized_pnl_eth: number;
   unrealized_pnl_eth: number;
   total_pnl_eth: number;
+  /** FIFO-unmatched DEX buys x current price. NOT an on-chain balance: see `holdings.verified_value_eth` on the profile. */
   held_value_eth: number;
   unique_tokens: number;
+  /** FIFO-open positions (unmatched DEX buys). How many are actually still held is in the profile's `holdings`. */
   open_positions: number;
   window_days: number;
   /** Hit the per-wallet trade cap — figures cover part of the window only. */
@@ -2100,11 +2510,67 @@ export interface RhcWalletProfileResponse {
     avg_trade_size_eth: number | null;
     is_active: boolean;
   };
+  /**
+   * Server 2026-10-02 — on-chain verification of every FIFO-open position.
+   * `top_tokens[].holding_status` carries the per-token status
+   * ({@link RhcHoldingStatus}; null when the token is FIFO-closed), and
+   * `top_tokens[].still_holding` keeps its FIFO meaning. null when the
+   * snapshot was unavailable; absent on older servers.
+   */
+  holdings?: RhcHoldingsSummary | null;
   /** Snapshot timed out — `flags` still resolve. */
   stats_unavailable: boolean;
   /** The wallet trio shares one snapshot cache; `true` = this call reused it. */
   cache_hit: boolean;
   _rid?: string;
+}
+
+/**
+ * Server 2026-10-02 — on-chain status of a FIFO-open position, from
+ * `balanceOf` on our own Robinhood Chain node. `HELD` = balance within 0.5 % of
+ * the FIFO amount; `PARTIALLY_REDUCED` = 0 < balance < FIFO;
+ * `TRANSFERRED_OR_DISPOSED` = balance 0; `EXTERNAL_INFLOW` = balance > FIFO (the
+ * excess has no cost basis, never trading profit); `BALANCE_UNVERIFIED` = the
+ * read failed, the token is non-standard or decimals disagree (no value, never
+ * assumed held).
+ */
+export type RhcHoldingStatus =
+  | "HELD"
+  | "PARTIALLY_REDUCED"
+  | "TRANSFERRED_OR_DISPOSED"
+  | "EXTERNAL_INFLOW"
+  | "BALANCE_UNVERIFIED";
+
+export type RhcHoldingUnverifiedReason =
+  | "rpc_unavailable"
+  | "call_failed"
+  | "decimals_failed"
+  | "over_cap"
+  | "decimals_mismatch"
+  | "decimals_unknown";
+
+/** Proven-holdings view over every FIFO-open position (`holdings` / `summary.holdings`). */
+export interface RhcHoldingsSummary {
+  balance_source: "rhc_node_multicall3";
+  checked_at: string;
+  /** `false` when at least one position is BALANCE_UNVERIFIED (it contributes no value). */
+  complete: boolean;
+  fifo_open_positions: number;
+  held: number;
+  partially_reduced: number;
+  transferred_or_disposed: number;
+  external_inflow: number;
+  unverified: number;
+  /** Proven balances x current price. Unverified and unpriced positions contribute nothing. */
+  verified_value_eth: number;
+  /** Verified positions with a non-zero balance but no current price. */
+  unpriced_held: number;
+  /** Cost basis of the FIFO-known portion still in the wallet. */
+  cost_basis_held_eth: number;
+  /** Unrealized PnL on the known-cost, still-held portion only. */
+  unrealized_known_eth: number;
+  /** Cost basis of FIFO lots no longer in the wallet. Outcome unknown: neither realized nor unrealized. */
+  cost_basis_not_held_eth: number;
 }
 
 export interface RhcOpenPosition {
@@ -2128,6 +2594,29 @@ export interface RhcOpenPosition {
   realized_so_far_eth: number;
   first_buy_at: string | null;
   last_buy_at: string | null;
+}
+
+/**
+ * A `/positions` row: the FIFO position (unchanged meaning) plus its on-chain
+ * check. The balance fields are absent on servers older than 2026-10-02.
+ */
+export interface RhcVerifiedOpenPosition extends RhcOpenPosition {
+  /** Same as `token_amount`: DEX buys not matched by a DEX sell. A trading position, not a balance. */
+  fifo_unmatched_amount?: number | null;
+  /** balanceOf(wallet) / 10^decimals from our node. null = not proven. */
+  current_onchain_balance?: number | null;
+  holding_status?: RhcHoldingStatus;
+  holding_unverified_reason?: RhcHoldingUnverifiedReason | null;
+  /** min(balance, FIFO): the held part whose cost basis is known. */
+  held_known_amount?: number | null;
+  external_inflow_amount?: number | null;
+  /** current_onchain_balance x current price. 0 when transferred out; null when unverified or unpriced. */
+  current_holding_value_eth?: number | null;
+  cost_basis_held_eth?: number | null;
+  /** Unrealized on the known-cost, still-held portion only. */
+  unrealized_known_eth?: number | null;
+  /** Cost basis of the FIFO portion no longer in the wallet. Outcome unknown. */
+  cost_basis_not_held_eth?: number | null;
 }
 
 export interface RhcClosedPosition {
@@ -2198,8 +2687,11 @@ export interface RhcWalletPositionsResponse {
     total_unrealized_eth: number;
     /** Excluded from the value and unrealized totals. */
     unpriced_positions: number;
+    /** Server 2026-10-02 — on-chain verification of the positions; absent on older servers. */
+    holdings?: RhcHoldingsSummary;
   };
-  positions: RhcOpenPosition[];
+  /** FIFO positions plus (server 2026-10-02) their on-chain balance check. */
+  positions: RhcVerifiedOpenPosition[];
   notes: Record<string, unknown>;
   _rid?: string;
 }
@@ -2375,6 +2867,24 @@ export interface RhcCopyTradeSubscription {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** Source wallets that are tracked RHC KOL wallets (only these can fire). null when the tracking read failed. Server 2026-09-25 on. */
+  source_wallets_tracked?: string[] | null;
+  /** Source wallets that are not tracked: they never produce a signal. */
+  source_wallets_untracked?: string[] | null;
+  /** Present only when something needs attention — e.g. `untracked_source_wallets`. */
+  warnings?: RhcCopyTradeRuleWarning[];
+  /**
+   * Server 2026-10-02 — whether the rule can fire at all, separate from
+   * `is_active` (your switch): `eligible` (at least one tracked source wallet),
+   * `no_tracked_sources` (kept, but can never fire) or `unknown` (the tracking
+   * read failed; never assumed eligible). Absent on older servers.
+   */
+  operational_state?: "eligible" | "no_tracked_sources" | "unknown";
+}
+
+export interface RhcCopyTradeRuleWarning {
+  code: "untracked_source_wallets" | "source_wallet_tracking_unavailable" | (string & {});
+  message: string;
 }
 
 export interface RhcCopyTradeListResponse {
@@ -2406,6 +2916,8 @@ export interface RhcCopyTradeCreateResponse {
   /** Shown ONCE — null when `delivery_mode` is `websocket`. */
   webhook_secret: string | null;
   note: string;
+  /** Mirror of `subscription.warnings` — present when any source wallet is untracked or the tracking lookup was unavailable. */
+  warnings?: RhcCopyTradeRuleWarning[];
   _rid?: string;
 }
 
@@ -2920,6 +3432,17 @@ export interface StreamToken {
   rotated?: boolean;
   /** Human-readable lifetime statement from the server (e.g. `"never expires"`). */
   lifetime?: string;
+  /** DEX firehose endpoint — present for ULTRA / BUSINESS / ENTERPRISE only. */
+  dex_ws_url?: string;
+  /** Connect instructions. */
+  usage?: string;
+  subscribe_example?: { type: "subscribe"; channels: string[] };
+  /** Every channel name the stream accepts. */
+  channels?: string[];
+  /** rhc:token_prices subscribe help (filters.addresses required; cap per tier). */
+  rhc_token_prices?: { subscribe_example: Record<string, unknown>; address_cap: number | null; coalesce_ms: number; note: string };
+  /** Named-subscription help (cap per connection by tier). */
+  named_subscriptions?: { subscribe_example: Record<string, unknown>; max_per_connection: number | null; note: string };
   [key: string]: unknown;
 }
 
@@ -3079,6 +3602,50 @@ class TokensClient {
    */
   equities(params?: RhcEquitiesParams): Promise<RhcEquitiesResponse> {
     return this._fetch(buildUrl(this._baseUrl, "/rhc/equities", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Token locks & vesting feed — newest lock / vesting contracts CREATED on
+   * chain across all tokens, decoded from the locker contracts' own events on
+   * our node. Each row carries the on-chain schedule, a live derived view
+   * (`locked_*`, `unlocked_*`, `next_unlock`, `status`, countdowns) and
+   * provenance (`provider.identity`: verified / compatible / unverified;
+   * `explorer` links). **Create-only**: withdrawals are not tracked
+   * (`withdrawn` is null, `coverage.withdrawals_tracked: false`). LP locks are
+   * excluded unless `subject: "lp" | "all"` and never claim usd / pct. Amounts
+   * are raw base units as STRINGS. Cursor: `pagination.next_cursor` (or
+   * `next_since` to poll). Tier: **PRO+**. `GET /rhc/tokens/locks`
+   */
+  locksFeed(params?: RhcTokenLocksParams): Promise<RhcTokenLocksResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/tokens/locks", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Every lock / vesting contract on ONE token with a live summary: locked /
+   * deposited (raw + ui + usd + % of supply), `unlocking_7d` / `unlocking_30d`,
+   * nearest `next_unlock`, `active_cancelable_by_sender`, counts by family /
+   * kind; LP locks counted apart. Tier: **PRO+**. `GET /rhc/tokens/{address}/locks`
+   */
+  locks(address: string, params?: RhcTokenLockSummaryParams): Promise<RhcTokenLockSummaryResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/locks`, params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * Upcoming unlock EVENTS across all active lock / vesting contracts — each
+   * contract's next cliff / tranche / final unlock inside the window with the
+   * event amount and the contract's total release over the window. Token
+   * subject only. Tier: **PRO+**. `GET /rhc/tokens/unlocks`
+   */
+  unlocks(params?: RhcTokenUnlocksParams): Promise<RhcTokenUnlocksResponse> {
+    return this._fetch(buildUrl(this._baseUrl, "/rhc/tokens/unlocks", params as Record<string, string | number | undefined>));
+  }
+
+  /**
+   * First buyers of a token, ranked, with still-holding status. Tier: **PRO+**.
+   * `GET /rhc/tokens/{address}/early-buyers`
+   */
+  earlyBuyers(address: string, params?: { limit?: number }): Promise<RhcEarlyBuyersResponse> {
+    return this._fetch(buildUrl(this._baseUrl, `/rhc/tokens/${encodeURIComponent(address)}/early-buyers`, params as Record<string, string | number | undefined>));
   }
 
   /**
