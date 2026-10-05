@@ -3077,20 +3077,55 @@ export interface RhcCopyTradeSubscription {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  /** Source wallets that are tracked RHC KOL wallets (only these can fire). null when the tracking read failed. Server 2026-09-25 on. */
+  /**
+   * Source wallets that are tracked RHC KOL wallets (`kol_evm_wallets`). Under
+   * `source_admission: "any_wallet"` (production since 2026-10-04) this is KOL
+   * enrichment only; under the legacy `"kol_only"` engine only these fire.
+   * null when the tracking read failed. Server 2026-09-25 on.
+   * @deprecated 2026-10-04 — kept and still filled; KOL membership is enrichment only.
+   */
   source_wallets_tracked?: string[] | null;
-  /** Source wallets that are not tracked: they never produce a signal. */
+  /**
+   * Source wallets that are not tracked KOL wallets. Under `"any_wallet"` they
+   * fire like any other wallet; under the legacy `"kol_only"` engine they never
+   * produce a signal.
+   * @deprecated 2026-10-04 — kept and still filled; KOL membership is enrichment only.
+   */
   source_wallets_untracked?: string[] | null;
-  /** Present only when something needs attention — e.g. `untracked_source_wallets`. */
+  /** Present only when something needs attention (legacy kol_only: `untracked_source_wallets`); omitted under any_wallet. */
   warnings?: RhcCopyTradeRuleWarning[];
   /**
-   * Server 2026-10-02 — whether the rule can fire at all, separate from
-   * `is_active` (your switch): `eligible` (at least one tracked source wallet),
-   * `no_tracked_sources` (kept, but can never fire) or `unknown` (the tracking
-   * read failed; never assumed eligible). Absent on older servers.
+   * Whether the rule can fire right now, separate from `is_active` (your
+   * switch); see {@link RhcCopyTradeOperationalState}. Server 2026-10-02 on;
+   * absent on older servers.
    */
-  operational_state?: "eligible" | "no_tracked_sources" | "unknown";
+  operational_state?: RhcCopyTradeOperationalState;
+  /** Server 2026-10-04 — which trades the RUNNING engine admits. Absent = unknown (legacy kol_only semantics). */
+  source_admission?: RhcCopyTradeSourceAdmission;
+  /** Server 2026-10-04 — present only with `operational_state: "monitoring_unavailable"`: e.g. `dex_stream_stale`, `trade_stream_stale`, `source_producer_stale`, `bus_disconnected`, `engine_state_stale`. */
+  monitoring_reasons?: string[];
 }
+
+/**
+ * Which trades the running copy-trade engine admits. `any_wallet` (production
+ * since 2026-10-04): copy-trade rules can now follow any valid 0x wallet, KOL or
+ * not (the ERC-4337 userOp sender on bundled transactions; KOL membership is
+ * enrichment only). `kol_only`: legacy, only tracked KOL wallets fire.
+ */
+export type RhcCopyTradeSourceAdmission = "kol_only" | "any_wallet";
+
+/**
+ * Whether a copy-trade rule can fire. Under `any_wallet`: `eligible`, or an
+ * infrastructure state — `monitoring_pending` (rule changed after the engine's
+ * last load, live within seconds), `monitoring_unavailable` (engine / trade
+ * stream not reporting; it fires nothing then, see `monitoring_reasons`),
+ * `source_capacity_unavailable` (engine source-wallet cap reached). Legacy
+ * `kol_only`: `no_tracked_sources` (none of the wallets is a tracked KOL
+ * wallet) | `unknown` (the tracking read failed; never assumed eligible).
+ */
+export type RhcCopyTradeOperationalState =
+  | "eligible" | "monitoring_pending" | "monitoring_unavailable" | "source_capacity_unavailable"
+  | "no_tracked_sources" | "unknown";
 
 export interface RhcCopyTradeRuleWarning {
   code: "untracked_source_wallets" | "source_wallet_tracking_unavailable" | (string & {});
