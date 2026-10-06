@@ -484,6 +484,14 @@ export interface RhcTrade {
   trader_eoa: string | null;
   /** Router/aggregator contract (tx.to). */
   router: string | null;
+  /**
+   * 2026-10: pool-pair attribution state, present only when recorded.
+   * `attributed`: one side is a recognized quote, so `token_address` / `action`
+   * are set. `quote_quote` / `equity_equity` / `unsupported_pair`: no basis to
+   * call either side the token, so both are null. Absent = not recorded (older,
+   * curve-event and archive rows); absent never implies `attributed`.
+   */
+  pair_status?: "attributed" | "quote_quote" | "equity_equity" | "unsupported_pair";
   token_address: string | null;
   action: TradeAction | null;
   eth_amount: number | null;
@@ -1690,6 +1698,16 @@ export interface RhcHoldersResponse {
     "7d": RhcHolderGrowthWindow | null;
     note: string;
   } | null;
+  /**
+   * 2026-10: per-token history continuity of the Transfer-log fold. Present only
+   * when the server's coverage read is enabled. `verified_interval` = fold proven
+   * continuous from the token's birth and reconciled; `recovery_pending` = a
+   * repair is rebuilding it; `partial_history` = folded only while tracked, a
+   * re-entry gap, a failed/non-standard token, or the coverage read failed
+   * (`reason` says which). `reconciliation.recon_ok` alone is NOT proof of
+   * correct individual balances.
+   */
+  history_coverage?: RhcHolderHistoryCoverage;
   reconciliation: {
     recon_ok: boolean;
     recon_supply: string | null;
@@ -2362,7 +2380,34 @@ export interface RhcWalletFundingResponse {
   coverage: RhcFundingCoverage;
   disclaimer: string;
   direct_funding?: RhcDirectFunding;
+  /** 2026-10: what the funding collector can see for THIS address. */
+  wallet_coverage?: RhcWalletFundingCoverage;
   _rid?: string;
+}
+
+/**
+ * Per-address funding collector coverage (`wallet_coverage`). `not_tracked` = no
+ * evidence is collected for it at all; `internal_transfers_not_visible` = tracked,
+ * but the address is a contract / EIP-7702 smart account whose native funding
+ * typically arrives as internal value the node cannot show.
+ */
+export interface RhcWalletFundingCoverage {
+  state: "tracked" | "not_tracked" | "internal_transfers_not_visible";
+  currently_tracked: boolean;
+  ever_tracked: boolean;
+  /** Resolved only while the address is currently tracked. */
+  address_kind: "eoa" | "eoa_7702" | "contract" | "unknown" | null;
+  limitations: Array<"spl_token_transfers_not_visible" | "internal_eth_transfers_not_visible" | "erc20_only_eth_weth_usdg_classified_as_funding">;
+}
+
+/** `history_coverage` block of `GET /rhc/tokens/{address}/holders`. */
+export interface RhcHolderHistoryCoverage {
+  state: "verified_interval" | "recovery_pending" | "partial_history";
+  history: string;
+  reason: string | null;
+  fold_from_block: number | null;
+  compared_at_block: number | null;
+  verified_at_block: number | null;
 }
 
 // ─── Token locks & vesting (GET /rhc/tokens/locks, /rhc/tokens/{address}/locks, /rhc/tokens/unlocks) ───
