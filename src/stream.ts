@@ -49,6 +49,7 @@ export type StreamChannel =
   | "rhc:token_candles"           // live 1-minute candles for filters.addresses (own cap PRO 25 / ULTRA 100 / BUSINESS 250), filters.updates adds the open minute (Phase 4) — PRO+
   | "rhc:token_risk"              // risk-verdict changes + an rhc:risk_verdict snapshot for filters.addresses (Phase 4) — PRO+
   | "rhc:wallet_scores"           // deployer tier changes for filters.wallets (0x deployers) (Phase 4) — PRO+
+  | "rhc:token_bundles"           // every NEW same-block buy cluster on any token, launch or later (optional filters: RhcTokenBundlesFilters) — PRO+
   /**
    * @deprecated `rhc:trades` was never a real server channel — 0.4.0 subscribers
    * got a `channels_rejected` warning and silence. The server now accepts it as
@@ -73,6 +74,7 @@ export const STREAM_CHANNELS: readonly StreamChannel[] = [
   "rhc:token_candles",
   "rhc:token_risk",
   "rhc:wallet_scores",
+  "rhc:token_bundles",
 ];
 
 /** Event names delivered on those channels. */
@@ -97,7 +99,9 @@ export type StreamEventName =
   | "rhc:candle_update"           // on rhc:token_candles with filters.updates: true — in-progress minute, a state stream (no id/seq)
   | "rhc:risk_verdict_changed"    // on rhc:token_risk (RhcRiskVerdictChangedEvent)
   | "rhc:risk_verdict"            // on rhc:token_risk — snapshot frame (frame.snapshot === true), the current stored verdict
-  | "rhc:deployer_tier_changed";  // on rhc:wallet_scores (RhcDeployerTierChangedEvent)
+  | "rhc:deployer_tier_changed"   // on rhc:wallet_scores (RhcDeployerTierChangedEvent)
+  | "rhc:token_bundle_cluster"    // on rhc:token_bundles — one new coordinated buy cluster (RhcTokenBundleClusterEvent)
+  | "rhc:token_bundle_exit";      // on rhc:token_bundles — that cluster sold 25/50/90/100 % of its cluster buy (RhcTokenBundleExitEvent)
 
 /** Minimal stream-token shape the client needs (token + ws_url). */
 export interface StreamTokenLike {
