@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * route-parity-check.mjs — fails CI if this SDK references an `/rhc/*` API path
- * that is not one of the 59 published Robinhood Chain route patterns (rename
- * drift). 59 patterns — the rule-engine collection and item paths
+ * that is not one of the 64 published Robinhood Chain route patterns (rename
+ * drift). 64 patterns — the rule-engine collection and item paths
  * each serve several methods (GET/POST, GET/PATCH/DELETE).
  *
  * This standalone repo is NOT scanned by the monorepo's sdk-route-parity guard,
- * so it ships its own. The 59 patterns are pinned below (the authoritative RHC
+ * so it ships its own. The 64 patterns are pinned below (the authoritative RHC
  * surface, chain id 4663). Set OPENAPI_URL to instead validate against the live
  * spec's `/rhc/*` paths.
  *
@@ -22,7 +22,7 @@ import path from "node:path";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(here, "..", "src");
 
-// The 59 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
+// The 64 authoritative Robinhood Chain route patterns (relative to /api/v1), normalized.
 const RHC_ROUTES = [
   "/rhc/alpha-wallets",
   "/rhc/alpha/leaderboard",
@@ -30,6 +30,7 @@ const RHC_ROUTES = [
   "/rhc/copytrade/subscriptions",
   "/rhc/copytrade/subscriptions/:p",
   "/rhc/deployer-hunter/:p",
+  "/rhc/deployer-hunter/:p/activity",
   "/rhc/deployer-hunter/:p/history",
   "/rhc/deployer-hunter/:p/tokens",
   "/rhc/deployer-hunter/:p/trajectory",
@@ -49,6 +50,7 @@ const RHC_ROUTES = [
   "/rhc/kol/first-touches/subscriptions/:p",
   "/rhc/kol/hot-tokens",
   "/rhc/kol/leaderboard",
+  "/rhc/kol/scouts/leaderboard",
   "/rhc/kol/tokens/hot",
   "/rhc/lp-events",
   "/rhc/price-alerts",
@@ -59,6 +61,8 @@ const RHC_ROUTES = [
   "/rhc/tokens",
   "/rhc/tokens/:p",
   "/rhc/tokens/:p/bundle",
+  "/rhc/tokens/:p/bundle-share",
+  "/rhc/tokens/:p/bundles",
   "/rhc/tokens/:p/buyer-quality",
   "/rhc/tokens/:p/candles",
   "/rhc/tokens/:p/early-buyers",
@@ -66,6 +70,7 @@ const RHC_ROUTES = [
   "/rhc/tokens/:p/flow",
   "/rhc/tokens/:p/holders",
   "/rhc/tokens/:p/kol-consensus",
+  "/rhc/tokens/:p/kol-trades",
   "/rhc/tokens/:p/peak-history",
   "/rhc/tokens/:p/risk",
   "/rhc/tokens/:p/top-traders",
