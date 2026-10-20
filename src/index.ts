@@ -1766,6 +1766,10 @@ export interface RhcTokenBundleShareResponse {
   /** `launch_cohort_only` = the cluster function was unavailable; only the launch bundle is counted. */
   scope: "launch_and_clusters" | "launch_cohort_only";
   clusters_status: "ok" | "unavailable" | "timeout" | "error";
+  /** True only when every coordinated buy cluster in the window was read: `clusters_status` ok AND fewer than `clusters_limit` clusters came back. When false (`held_now.incomplete_reason` `clusters_truncated`, or `scope` `launch_cohort_only`), `bundled_pct_of_supply_now` is null. */
+  clusters_complete: boolean;
+  /** Most clusters read per request (200). A response with this many clusters is treated as possibly truncated. */
+  clusters_limit: number;
   wallets: {
     total: number;
     launch_cohort_wallets: number;
@@ -3018,7 +3022,8 @@ export interface RhcTokenLocksParams {
 
 export type RhcLockFamily =
   | "pinklock" | "teamfinance" | "teamfinance-nft" | "uncx-v2-lp" | "uncx-v3-lp" | "uncx-vesting" | "vesting-fork"
-  | "goplus" | "titan" | "titan-position" | "titan-vesting" | "hoodlock" | "hoodlock-vesting" | "sablier";
+  | "goplus" | "titan" | "titan-position" | "titan-vesting" | "hoodlock" | "hoodlock-vesting" | "sablier"
+  | "stonkbrokers-vesting";
 
 export type RhcLockSubject = "token" | "lp";
 

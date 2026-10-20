@@ -2,8 +2,8 @@
   "schema": 1,
   "sdk": "robinhood-chain-sdk",
   "source_repo": "MadeOnSol/madeonsol",
-  "source_sha": "753b99a04614153c4464e5284acb129cd5df01b4",
+  "source_sha": "6deebe18dee7ee69dc1a0b6460200d9da39e720e",
   "source_dirty": false,
-  "contract_hash": "1bba8efe27bc5f3c4f506d327c9b59015d760d7b2d9017d2de9c59981ef01249",
+  "contract_hash": "2bf68352028ca4f98bfd8b6e9e4b974085769157cc04fb59b019cacbf5d0739f",
   "operation_count": 206
 }
