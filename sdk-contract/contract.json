@@ -2,7 +2,7 @@
   "schema": 1,
   "source": "MadeOnSol/madeonsol src/lib/openapi-spec.ts (scripts/generate-sdk-contract.mjs)",
   "api_version": "1.20.0",
-  "contract_hash": "1bba8efe27bc5f3c4f506d327c9b59015d760d7b2d9017d2de9c59981ef01249",
+  "contract_hash": "2bf68352028ca4f98bfd8b6e9e4b974085769157cc04fb59b019cacbf5d0739f",
   "operation_count": 206,
   "operations": [
     {
@@ -57,6 +57,8 @@
             "total_sells",
             "total_sol_bought",
             "total_sol_sold",
+            "unknown_cost_basis_sol",
+            "unknown_realizations",
             "wallet",
             "win_rate",
             "wins"
@@ -1087,9 +1089,11 @@
             "avg_roi_7d",
             "closed_positions_30d",
             "closed_positions_7d",
+            "completeness",
             "consistency_7d",
             "early_entry_pct_30d",
             "found",
+            "incomplete_reasons",
             "is_cold",
             "is_heating_up",
             "median_hold_minutes_30d",
@@ -1105,6 +1109,9 @@
             "profit_factor_7d",
             "strategy_tag",
             "twitter_url",
+            "unknown_proceeds_sells",
+            "unknown_realizations",
+            "unknown_realizations_7d",
             "wallet",
             "winrate_30d",
             "winrate_7d"
@@ -1650,12 +1657,16 @@
           "leaderboard": [
             "avg_entry_mc_usd",
             "buy_count",
+            "completeness",
             "entry_mc_samples",
+            "incomplete_reasons",
             "median_hold_minutes_30d",
             "name",
             "percentile_early_entry_30d",
             "pnl",
             "sell_count",
+            "unknown_proceeds_sells",
+            "unknown_realizations",
             "volume",
             "wallet",
             "win_rate"
@@ -1775,6 +1786,7 @@
             "kols_total",
             "last_kol_buy_at",
             "net_flow",
+            "sell_sol_complete",
             "strategies",
             "time_to_consensus_sec",
             "token_image_url",
@@ -1783,7 +1795,8 @@
             "token_symbol",
             "total_buy_sol",
             "total_sell_sol",
-            "unique_strategies"
+            "unique_strategies",
+            "unknown_proceeds_sells"
           ]
         }
       }
@@ -2061,7 +2074,8 @@
             "token_name",
             "token_symbol",
             "total_bought",
-            "total_sold"
+            "total_sold",
+            "unknown_proceeds_sells"
           ],
           "recent_losers": [
             "buy_count",
@@ -2119,11 +2133,15 @@
       "response": {
         "top": [
           "closed_positions",
+          "completeness",
+          "incomplete_reasons",
           "kol",
           "open_positions",
           "period",
           "pnl_curve",
-          "summary"
+          "summary",
+          "unknown_proceeds_sells",
+          "unknown_realizations"
         ],
         "items": {
           "closed_positions": [
@@ -2134,6 +2152,7 @@
             "hold_minutes",
             "last_trade",
             "pnl_sol",
+            "realization_status",
             "result",
             "roi_pct",
             "sell_count",
@@ -2142,6 +2161,7 @@
             "token_mint",
             "token_name",
             "token_symbol",
+            "unknown_proceeds_sells",
             "unrealized_pnl_sol"
           ],
           "open_positions": [
@@ -2159,7 +2179,8 @@
             "cumulative_pnl",
             "date",
             "day_pnl",
-            "trades"
+            "trades",
+            "unknown_sells"
           ]
         }
       }
@@ -4691,6 +4712,8 @@
           "as_of",
           "bundled_pct_of_supply_now",
           "chain",
+          "clusters_complete",
+          "clusters_limit",
           "clusters_status",
           "held_now",
           "min_wallets",
@@ -6227,7 +6250,8 @@
             "volume_24h_usd",
             "volume_usd",
             "vwap_price_sol",
-            "vwap_price_usd"
+            "vwap_price_usd",
+            "vwap_status"
           ]
         }
       }
@@ -6879,6 +6903,8 @@
         "top": [
           "as_of",
           "bundled_pct_of_supply_now",
+          "clusters_complete",
+          "clusters_limit",
           "clusters_status",
           "held_now",
           "min_wallets",
@@ -7515,9 +7541,11 @@
       "body": [],
       "response": {
         "top": [
+          "completeness",
           "cost_method",
           "cost_method_note",
           "coverage",
+          "incomplete_reasons",
           "mint",
           "sort",
           "summary",
@@ -7541,12 +7569,15 @@
             "last_trade_at",
             "rank",
             "realized_pnl_sol",
+            "realized_status",
             "roi",
             "sells",
             "sold_sol",
             "still_holding",
             "total_pnl_sol",
             "trades",
+            "unattributed_sells",
+            "unknown_realized_cost_basis_sol",
             "unmatched_sell_tokens",
             "unrealized_pnl_sol",
             "wallet"
@@ -7591,6 +7622,7 @@
             "amounts",
             "block_time",
             "early_buyer_rank",
+            "event",
             "market_price_sol",
             "market_price_usd",
             "price_sol",
@@ -7950,12 +7982,15 @@
       "response": {
         "top": [
           "address",
+          "completeness",
           "coverage",
           "degraded_fields",
           "deployer_breakdown",
           "derived",
           "enrichment_unavailable",
           "flags",
+          "incomplete_reasons",
+          "pnl_basis_note",
           "recent_trades",
           "stats",
           "stats_unavailable",
@@ -7978,11 +8013,14 @@
             "last_traded_at",
             "peak_mc_usd",
             "realized_pnl_sol",
+            "realized_status",
             "sells",
             "sol_in",
             "sol_out",
             "token_mint",
-            "token_symbol"
+            "token_symbol",
+            "unattributed_sells",
+            "unknown_realized_cost_basis_sol"
           ]
         }
       }
@@ -8136,8 +8174,10 @@
           "cache_invalidated",
           "cache_validation",
           "closed_positions",
+          "completeness",
           "computed_at",
           "holding_check",
+          "incomplete_reasons",
           "notes",
           "open_positions",
           "pnl_curve",
@@ -8153,11 +8193,13 @@
             "hold_minutes",
             "last_trade",
             "pnl_sol",
+            "realized_status",
             "result",
             "roi_pct",
             "sell_count",
             "sold_sol",
-            "token_mint"
+            "token_mint",
+            "unknown_realized_cost_basis_sol"
           ],
           "open_positions": [
             "avg_entry_price_sol",
@@ -8206,9 +8248,12 @@
           "cache_hit",
           "cache_invalidated",
           "cache_validation",
+          "completeness",
           "computed_at",
           "holding_check",
+          "incomplete_reasons",
           "positions",
+          "summary",
           "ttl_seconds"
         ],
         "items": {
@@ -8268,6 +8313,7 @@
             "action",
             "amounts",
             "block_time",
+            "event",
             "market_price_sol",
             "market_price_usd",
             "price_sol",
