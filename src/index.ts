@@ -2047,6 +2047,45 @@ export type RhcOwnerModel = "none" | "renounced" | "eoa" | "contract";
 export type RhcSellable = "yes" | "no" | "unknown";
 export type RhcLpCustody = "burned" | "locked" | "at_risk" | "unknown";
 
+/** One side of the measured tax; `null` tax = not measured, never 0. Raw amounts are uint256 decimal strings. */
+export interface RhcTaxSide {
+  status: "measured" | "unknown" | "not_assessed";
+  tax_bps: number | null;
+  /** Token amount put into the transfer. */
+  amount_in_raw: string | null;
+  /** sell: tokens the pair received. buy: tokens the buyer's balance grew by. */
+  amount_received_raw: string | null;
+  /** WETH pairs only, Router02 quote at the same block (wei): sell = WETH out for the after-tax tokens; buy = WETH cost of amount_in_raw. */
+  estimated_weth_raw: string | null;
+  reason: string | null;
+}
+
+/**
+ * Buy/sell tax measured on the token's uniswap-v2 pair at one block (simulated
+ * token transfers with the real router / pair as caller). Present only when the
+ * server enables it. Holds for that amount and block; not part of `score`.
+ */
+export interface RhcTokenTaxes {
+  status: "measured" | "unknown" | "not_assessed";
+  buy_tax_bps: number | null;
+  /** 10000 = a sell delivers nothing to the pair. */
+  sell_tax_bps: number | null;
+  venue: string | null;
+  pool: string | null;
+  block: number | null;
+  method: "eth_simulateV1_transfer";
+  buy: RhcTaxSide;
+  sell: RhcTaxSide;
+  reason: string | null;
+}
+
+/**
+ * `GET /rhc/tokens/{address}/risk`. A contract-capability + sellability check,
+ * NOT a trading-risk score: holders, deployer share, bots, taxes and depth do
+ * not move `score`. `band`, `top10_pct`, `deployer_pct`, `transfer_fee_bps` and
+ * `bot_dominated` are Solana-only and never present: use `tokens.holders()`
+ * (`concentration.*`, nested ratios 0-1) and `tokens.buyerQuality()`.
+ */
 export interface RhcRiskResponse {
   chain: Chain;
   token_address: string;
@@ -2071,16 +2110,49 @@ export interface RhcRiskResponse {
   liquidity: {
     primary_pool: string | null;
     dex: string | null;
-    /** Read only for uniswap-v2; v3/v4 LP sits in an NFT and reports "unknown". */
+    /** Scalar. Read only for uniswap-v2; v3/v4 LP sits in an NFT and reports "unknown". */
     lp_custody: RhcLpCustody;
+    /** Percent 0-100 of the uniswap-v2 LP supply at burn addresses; null = not measured. */
     lp_burned_pct: number | null;
+    /** Lock-aware v2 custody; present only when the server enables it. */
+    custody_detail?: Record<string, unknown> | null;
+    /** Most recent observed LP withdrawal; null = none seen since 2026-08-05. */
+    last_removed_at?: string | null;
   };
-  /** Simulated live through the router with state overrides. */
-  sellability: { sellable: RhcSellable; reason: string | null };
+  /** Simulated live through the router with state overrides. Says nothing about taxes. */
+  sellability: {
+    sellable: RhcSellable;
+    reason: string | null;
+    /** What was tested; a `yes` holds only for that route, amount and block. */
+    simulation?: {
+      venue: string | null;
+      pool: string | null;
+      router: string | null;
+      route: string[] | null;
+      fee: number | null;
+      amount_in: string | null;
+      block: number | null;
+      execution: "success" | "reverted" | "error" | "not_run";
+      amount_out: string | null;
+      override_verified: boolean | null;
+      reason: string | null;
+    } | null;
+  };
   flags: string[];
-  /** 0–100, conservative. Absence of evidence is not evidence of safety. */
+  /** 0–100: 100 minus fixed points per flag. Absence of evidence is not evidence of safety. */
   score: number | null;
-  coverage: { model: string; note: string };
+  /** Present only with `taxes` (server-enabled). */
+  buy_tax_bps?: number | null;
+  /** Present only with `taxes` (server-enabled). */
+  sell_tax_bps?: number | null;
+  taxes?: RhcTokenTaxes;
+  assessment?: {
+    status: "complete" | "incomplete";
+    unknown_inputs: string[];
+    not_assessed: string[];
+    explanations: Record<string, string>;
+  };
+  coverage: { model: string; note: string; liquidity_basis?: string; liquidity_note?: string };
   _rid?: string;
 }
 
@@ -4704,6 +4776,9 @@ class TokensClient {
    * discriminating signals are proxy upgradeability, LP custody and above all
    * **sellability**, which is simulated at the chain head and never cached
    * (whether a token can be sold changes the moment an owner flips a setting).
+   * `score` is a contract-capability + sellability check, not trading risk;
+   * buy/sell tax arrives as `taxes` + `buy_tax_bps` / `sell_tax_bps` once the
+   * server enables it (absent = not measured, null = unknown, never 0).
    * Tier: **PRO+**.
    * @param address Token address (0x, 40 hex).
    */
