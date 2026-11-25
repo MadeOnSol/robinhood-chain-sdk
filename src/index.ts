@@ -2063,7 +2063,7 @@ export interface RhcTaxSide {
 /**
  * Buy/sell tax measured on the token's uniswap-v2 pair at one block (simulated
  * token transfers with the real router / pair as caller). Present only when the
- * server enables it. Holds for that amount and block; not part of `score`.
+ * server enables it. Holds for that amount and block; not part of today's `score` (risk v2 scores it).
  */
 export interface RhcTokenTaxes {
   status: "measured" | "unknown" | "not_assessed";
@@ -2080,10 +2080,12 @@ export interface RhcTokenTaxes {
 }
 
 /**
- * `GET /rhc/tokens/{address}/risk`. A contract-capability + sellability check,
- * NOT a trading-risk score: holders, deployer share, bots, taxes and depth do
- * not move `score`. `band`, `top10_pct`, `deployer_pct`, `transfer_fee_bps` and
- * `bot_dominated` are Solana-only and never present: use `tokens.holders()`
+ * `GET /rhc/tokens/{address}/risk`. Today `score` covers contract capabilities
+ * and sellability only (holders, deployer, LP removals, bots, taxes and depth do
+ * not move it yet); risk v2 makes it the full safety score (same field, higher
+ * is better, colour, alerts) and keeps the contract-only value as
+ * `contract_score`. `band`, `top10_pct`, `deployer_pct`, `transfer_fee_bps` and
+ * `bot_dominated` are not present yet: use `tokens.holders()`
  * (`concentration.*`, nested ratios 0-1) and `tokens.buyerQuality()`.
  */
 export interface RhcRiskResponse {
@@ -4776,8 +4778,8 @@ class TokensClient {
    * discriminating signals are proxy upgradeability, LP custody and above all
    * **sellability**, which is simulated at the chain head and never cached
    * (whether a token can be sold changes the moment an owner flips a setting).
-   * `score` is a contract-capability + sellability check, not trading risk;
-   * buy/sell tax arrives as `taxes` + `buy_tax_bps` / `sell_tax_bps` once the
+   * Today `score` covers contract capabilities and sellability only; risk v2
+   * makes it the full safety score (higher is better, colour, alerts). Buy/sell tax arrives as `taxes` + `buy_tax_bps` / `sell_tax_bps` once the
    * server enables it (absent = not measured, null = unknown, never 0).
    * Tier: **PRO+**.
    * @param address Token address (0x, 40 hex).
