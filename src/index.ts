@@ -2051,18 +2051,18 @@ export type RhcLpCustody = "burned" | "locked" | "at_risk" | "unknown";
 export interface RhcTaxSide {
   status: "measured" | "unknown" | "not_assessed";
   tax_bps: number | null;
-  /** Token amount put into the transfer. */
+  /** sell: tokens the wallet sold; buy: tokens the pair sent out. */
   amount_in_raw: string | null;
   /** sell: tokens the pair received. buy: tokens the buyer's balance grew by. */
   amount_received_raw: string | null;
-  /** WETH pairs only, Router02 quote at the same block (wei): sell = WETH out for the after-tax tokens; buy = WETH cost of amount_in_raw. */
+  /** Native ETH in wei from the same simulated swap: sell = ETH received; buy = ETH paid. */
   estimated_weth_raw: string | null;
   reason: string | null;
 }
 
 /**
- * Buy/sell tax measured on the token's uniswap-v2 pair at one block (simulated
- * token transfers with the real router / pair as caller). Present only when the
+ * Buy/sell tax measured on the token's uniswap-v2 pair at one block (one real
+ * Router02 swap per side from a fresh wallet). Present only when the
  * server enables it. Holds for that amount and block; not part of today's `score` (risk v2 scores it).
  */
 export interface RhcTokenTaxes {
@@ -2073,7 +2073,7 @@ export interface RhcTokenTaxes {
   venue: string | null;
   pool: string | null;
   block: number | null;
-  method: "eth_simulateV1_transfer";
+  method: "eth_simulateV1_router_swap";
   buy: RhcTaxSide;
   sell: RhcTaxSide;
   reason: string | null;
