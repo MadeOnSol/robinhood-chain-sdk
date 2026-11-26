@@ -2072,6 +2072,12 @@ export interface RhcTaxSide {
   /** Who took route_fee_bps (full address); null when the route has no such fee. */
   route_fee_source?: { kind: "uniswap_v4_hook" | "launchpad_fee"; address: string } | null;
   reason: string | null;
+  /**
+   * Optional: "synthetic_fresh_wallet" when this side is `measured` from a swap simulated by a fresh
+   * synthetic wallet; absent for declared (e.g. Flap), unknown and not_assessed sides. A measured 0 stays 0.
+   * The outcome holds for the tested wallet, route, amount and block: a fresh test wallet cannot see owner-set per-wallet blocks, allow/deny lists, holding-time, launch-age or volume limits, or later rate changes.
+   */
+  wallet_scope?: "synthetic_fresh_wallet";
 }
 
 /**
@@ -2154,6 +2160,12 @@ export interface RhcRiskResponse {
       amount_out: string | null;
       override_verified: boolean | null;
       reason: string | null;
+      /**
+       * Optional: "synthetic_fresh_wallet" when the sell call really executed from a fresh synthetic wallet
+       * (absent when it did not run). A `yes` does not prove an existing holder can sell.
+       * The outcome holds for the tested wallet, route, amount and block: a fresh test wallet cannot see owner-set per-wallet blocks, allow/deny lists, holding-time, launch-age or volume limits, or later rate changes.
+       */
+      wallet_scope?: "synthetic_fresh_wallet";
     } | null;
   };
   flags: string[];
