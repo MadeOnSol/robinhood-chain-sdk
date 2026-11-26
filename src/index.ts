@@ -2049,31 +2049,47 @@ export type RhcLpCustody = "burned" | "locked" | "at_risk" | "unknown";
 
 /** One side of the measured tax; `null` tax = not measured, never 0. Raw amounts are uint256 decimal strings. */
 export interface RhcTaxSide {
-  status: "measured" | "unknown" | "not_assessed";
+  /** measured = a reconciling simulated swap; declared = the rate the token declares on chain (never proves what a trader pays; a declared 0 is not a measured 0). */
+  status: "measured" | "declared" | "unknown" | "not_assessed";
   tax_bps: number | null;
+  /** simulated (swap simulation) | declared_onchain (read from the token contract) | null (no route ran). Optional: older servers omit it. */
+  basis?: "simulated" | "declared_onchain" | null;
+  /** The declared on-chain rate when one was read (today Flap tokens), with the contract, helper and block of the read. */
+  declared?: { tax_bps: number; contract: string; helper: string | null; block: number } | null;
+  /** Simulation vs declaration differ by more than 50 bps: both kept, side unknown, tax_bps null. */
+  conflict?: { simulated_tax_bps: number; declared_tax_bps: number } | null;
   /** sell: tokens the wallet sold; buy: tokens the pair sent out. */
   amount_in_raw: string | null;
   /** sell: tokens the pair received. buy: tokens the buyer's balance grew by. */
   amount_received_raw: string | null;
   /** Native ETH in wei from the same simulated swap: sell = ETH received; buy = ETH paid. */
   estimated_weth_raw: string | null;
+  /**
+   * Fee the route took outside the token's tax (a uniswap-v4 hook or a launchpad curve), bps of the side's base.
+   * 0 = the trace proves it took nothing; null = no such fee on this route, or not measured. Pool LP fees are never route fees.
+   */
+  route_fee_bps?: number | null;
+  /** Who took route_fee_bps (full address); null when the route has no such fee. */
+  route_fee_source?: { kind: "uniswap_v4_hook" | "launchpad_fee"; address: string } | null;
   reason: string | null;
 }
 
 /**
- * Buy/sell tax measured on the token's uniswap-v2 pair at one block (one real
- * Router02 swap per side from a fresh wallet). Present only when the
- * server enables it. Holds for that amount and block; not part of today's `score` (risk v2 scores it).
+ * Buy/sell tax measured on the token's own venue at one block (one real swap per
+ * side from a fresh wallet on uniswap-v2 / v3 / v4 / pons-v2 / bags / hood.fun;
+ * Flap rates as declared on chain). Present only when the server enables it. Holds for that amount and block; not part of today's `score` (risk v2 scores it).
  */
 export interface RhcTokenTaxes {
-  status: "measured" | "unknown" | "not_assessed";
+  /** measured = both sides measured; declared = both sides carry a value, at least one declared; unknown = a side has none. */
+  status: "measured" | "declared" | "unknown" | "not_assessed";
   buy_tax_bps: number | null;
   /** 10000 = a sell delivers nothing to the pair. */
   sell_tax_bps: number | null;
   venue: string | null;
   pool: string | null;
   block: number | null;
-  method: "eth_simulateV1_router_swap";
+  /** onchain_declaration = declared rates only (no proven swap route). */
+  method: "eth_simulateV1_router_swap" | "onchain_declaration";
   buy: RhcTaxSide;
   sell: RhcTaxSide;
   reason: string | null;
